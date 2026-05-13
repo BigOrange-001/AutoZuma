@@ -27,8 +27,9 @@ The current refactor has completed the foundation layers:
 - Strategy line-of-sight filtering.
 - Strategy target selection.
 - Basic strategy command generation.
+- ROI-to-screen command coordinate mapping.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, prediction, swaps, fallback discard, ROI-to-screen command mapping, or command execution has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, prediction, swaps, fallback discard, runtime cooldowns, or command execution has been done yet.
 
 ## Important Paths
 
@@ -233,6 +234,18 @@ Behavior:
 - Converts missing target selection into `CommandType.NO_OP`.
 - Does not yet handle ROI-to-screen offsets, prediction, double shots, swaps, cooldowns, locks, fallback discard, or mouse execution.
 
+### ROI-To-Screen Command Mapping
+
+File: `src/autozuma/control/commands.py`
+
+Behavior:
+
+- Converts ROI-local `Command` target points into screen-frame coordinates using `GameRoiResult.offset`.
+- Offsets both primary and secondary targets when present.
+- Preserves command type and delay.
+- Leaves targetless commands targetless.
+- Does not execute mouse input or enforce runtime cooldowns.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -258,20 +271,20 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 66 passed
+- `pytest`: 69 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
 ## Next Recommended Step
 
-The next clean step is to add ROI-to-screen command mapping.
+The next clean step is to add a static-frame decision pipeline that composes perception, scoring, selection, command generation, and ROI-to-screen mapping.
 
 Suggested scope:
 
-- Convert ROI-local command target points to screen-frame coordinates using `GameRoiResult.offset`.
-- Keep the conversion pure and independent from mouse execution.
-- Preserve `NO_OP` unchanged.
-- Add tests for `SHOOT` target offsetting and commands without targets.
+- Keep it pure and single-frame: no live capture, mouse execution, cooldowns, or locks.
+- Accept a raw frame, level assets, launcher templates, and strategy parameters.
+- Return a screen-frame `Command`.
+- Add tests with mocked or synthetic perception outputs for target and no-target paths.
 
 Do not migrate UI handling, mouse execution, runtime cooldowns, swaps, or fallback discard in the same step unless there is a specific reason.
 

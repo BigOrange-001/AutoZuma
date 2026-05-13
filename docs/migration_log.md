@@ -405,3 +405,27 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 66 tests.
 - `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### ROI-To-Screen Command Mapping Baseline
+
+Added the first control-layer transformation from ROI-local command coordinates to screen-frame command coordinates.
+
+Added:
+
+- `src/autozuma/control/__init__.py`.
+- `src/autozuma/control/commands.py`.
+- Control command mapping tests in `tests/test_control_commands.py`.
+
+Behavior:
+
+- `map_command_to_screen()` accepts a `Command` and `GameRoiResult`.
+- Offsets primary and secondary command targets by `GameRoiResult.offset`.
+- Preserves command type and delay.
+- Leaves commands without targets as targetless commands.
+- Does not execute mouse input, apply prediction, perform cooldown checks, handle swaps, or implement fallback discard.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 69 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
