@@ -110,6 +110,21 @@ class GameRoiResult:
 
 
 @dataclass(frozen=True)
+class LauncherTemplate:
+    angle_degrees: int
+    gray: Any
+    match_mask: Any
+    sub_mask: Any
+
+
+@dataclass(frozen=True)
+class LauncherTemplateSet:
+    search_radius: int
+    step_degrees: int
+    templates: dict[int, LauncherTemplate]
+
+
+@dataclass(frozen=True)
 class BallEntity:
     x: float
     y: float

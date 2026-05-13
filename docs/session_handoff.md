@@ -18,8 +18,9 @@ The current refactor has completed the foundation layers:
 - Runtime asset registry that loads topology, derived geometry, backgrounds, launcher template, and UI templates.
 - Static level recognition for migrated static-background levels.
 - Static ROI extraction/alignment for detected static levels.
+- Launcher frog rotated template generation.
 
-No live game automation, mouse execution, GUI, frame capture, ball detection, launcher detection, or strategy migration has been done yet.
+No live game automation, mouse execution, GUI, frame capture, ball detection, launcher state detection, color classification, or strategy migration has been done yet.
 
 ## Important Paths
 
@@ -49,6 +50,7 @@ Current model groups:
 - Geometry models: `TrackGeometry`, `LevelGeometry`
 - Runtime asset models: `ImageAsset`, `LevelRuntimeAssets`, `TemplateAssets`, `AssetRegistry`
 - Perception result models: `LevelDetectionResult`, `GameRoiResult`
+- Launcher template models: `LauncherTemplate`, `LauncherTemplateSet`
 - Future gameplay skeletons: `BallEntity`, `Cluster`, `LauncherState`, `WorldState`, `TargetCandidate`, `Command`
 
 ### Asset Loading And Validation
@@ -117,6 +119,17 @@ Behavior:
 - Rejects frames smaller than the static background.
 - Rejects `space` because it has no static background.
 
+### Launcher Template Generation
+
+File: `src/autozuma/vision/launcher_templates.py`
+
+Behavior:
+
+- Builds rotated launcher frog templates from `registry.templates.launcher_frog`.
+- Uses explicit `LauncherTemplateSet` data instead of prototype global `FROG_TEMPLATES`.
+- Preserves prototype defaults: search radius `50`, angle step `5`.
+- Generates grayscale templates, match masks, and subtraction masks for angles `0..355`.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -142,22 +155,23 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 28 passed
+- `pytest`: 32 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
 ## Next Recommended Step
 
-The next clean step is to migrate launcher template cache generation.
+The next clean step is to migrate launcher state detection.
 
 Suggested scope:
 
-- Add a clean version of prototype `vision/detector.py::init_template_cache`.
-- Store generated rotated launcher templates in an explicit model instead of `globals.FROG_TEMPLATES`.
-- Preserve the current angle step and mask generation behavior.
-- Add tests for angle count, template dimensions, and mask presence.
+- Add a clean version of prototype `vision/detector.py::detect_launcher_state_residual`.
+- Use `LauncherTemplateSet` instead of `globals.FROG_TEMPLATES`.
+- Keep color classification as a separate helper or small module if needed.
+- Return the existing `LauncherState` model instead of a dictionary.
+- Add tests using controlled ROI fixtures before relying on live gameplay screenshots.
 
-Do not migrate launcher state detection, ball detection, UI handling, or strategy in the same step unless there is a specific reason.
+Do not migrate ball-chain detection, UI handling, mouse execution, or strategy in the same step unless there is a specific reason.
 
 ## Design Rules To Preserve
 

@@ -187,3 +187,27 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 28 tests.
 - `.venv\Scripts\python -m ruff check .` passed.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Launcher Template Generation Baseline
+
+Migrated the launcher template generation slice from prototype `vision/detector.py::init_template_cache`.
+
+Added:
+
+- `LauncherTemplate` and `LauncherTemplateSet` models.
+- `src/autozuma/vision/launcher_templates.py`.
+- Launcher template generation tests in `tests/test_launcher_templates.py`.
+
+Behavior:
+
+- Uses `registry.templates.launcher_frog` instead of writing to global `FROG_TEMPLATES`.
+- Preserves the prototype default search radius of `50`.
+- Preserves the prototype default angle step of `5` degrees.
+- Aligns the launcher frog asset into a `search_radius * 2` square ROI.
+- Generates rotated grayscale templates, eroded match masks, and dilated subtraction masks for each angle.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 32 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
