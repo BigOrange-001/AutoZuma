@@ -308,3 +308,55 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 48 tests.
 - `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Basic Strategy Target Scoring Baseline
+
+Started the new strategy layer with a pure target-scoring slice.
+
+Added:
+
+- `src/autozuma/strategy/__init__.py`.
+- `src/autozuma/strategy/targets.py`.
+- Basic strategy target tests in `tests/test_strategy_targets.py`.
+
+Behavior:
+
+- Consumes `WorldState`, `LevelRuntimeAssets`, and `TargetScoringParams`.
+- Returns sorted `TargetCandidate` instances.
+- Ignores unknown current-ball colors.
+- Scores only clusters matching the current launcher ball color.
+- Maps same-color clusters with size `>= 2` to `ELIM` targets.
+- Maps same-color single-ball clusters to `PAIR` targets.
+- Preserves the prototype's basic distance, shot/track orthogonality, local straightness, and bad-geometry penalty scoring terms.
+- Does not yet include combo depth, rollback, coins, action locks, line-of-sight, swap decisions, prediction, or command generation.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 53 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Strategy Line-Of-Sight Baseline
+
+Migrated the pure shot-clearance portion of prototype `logic/decision.py::check_line_of_sight_ext`.
+
+Added:
+
+- `src/autozuma/strategy/line_of_sight.py`.
+- Line-of-sight tests in `tests/test_line_of_sight.py`.
+
+Behavior:
+
+- Checks whether the ray from launcher pivot to target point is blocked by detected `BallEntity` instances.
+- Preserves the prototype physical clearance floor of `36` pixels.
+- Applies caller-provided `min_gap` when it is larger than the physical clearance floor.
+- Ignores entities too close to the target point.
+- Ignores entities inside the selected target cluster's padded track-index range.
+- Ignores same-track entities near the target to avoid false blockers on curved local track geometry.
+- Returns structured `LineOfSightResult(is_clear, min_distance)`.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 59 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.

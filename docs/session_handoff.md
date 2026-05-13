@@ -23,8 +23,10 @@ The current refactor has completed the foundation layers:
 - Stateless ball entity detection for static-background levels.
 - Topological cluster building from detected ball entities.
 - Static world-state perception assembly.
+- Basic strategy target scoring.
+- Strategy line-of-sight filtering.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, strategy migration, or command generation has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, target selection, or command generation has been done yet.
 
 ## Important Paths
 
@@ -182,6 +184,29 @@ Behavior:
 - Returns `WorldState(level_id, launcher, entities, clusters)`.
 - Currently supports only static-background levels; `space` remains a special detection gap.
 
+### Basic Strategy Target Scoring
+
+File: `src/autozuma/strategy/targets.py`
+
+Behavior:
+
+- Scores `WorldState` clusters that match the current launcher ball color.
+- Produces `TargetCandidate` values for basic `ELIM` and `PAIR` targets.
+- Keeps scoring pure and stateless with explicit `TargetScoringParams`.
+- Uses distance, shot/track orthogonality, local straightness, and bad-geometry penalty terms from the prototype baseline.
+- Does not yet handle combo depth, rollback, coins, line-of-sight, swaps, prediction, locks, or command generation.
+
+### Strategy Line-Of-Sight
+
+File: `src/autozuma/strategy/line_of_sight.py`
+
+Behavior:
+
+- Checks launcher-to-target ray clearance against detected `BallEntity` instances.
+- Preserves prototype clearance rules, target-cluster exclusion, and same-track near-target tolerance.
+- Returns `LineOfSightResult(is_clear, min_distance)`.
+- Does not yet select targets or generate commands.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -207,22 +232,22 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 48 passed
+- `pytest`: 59 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
 ## Next Recommended Step
 
-The next clean step is to migrate the first strategy/target-scoring slice against `WorldState`.
+The next clean step is to add target selection that combines scored targets with line-of-sight filtering.
 
 Suggested scope:
 
-- Start with a pure function that consumes `WorldState` plus strategy parameters and returns scored `TargetCandidate` values.
-- Preserve the prototype's normal elimination and pair-insertion behavior before migrating rescue/endgame/coin special cases.
-- Keep mouse execution and live process state outside this step.
-- Add focused tests around color matching, cluster-size scoring, and no-target behavior.
+- Add a pure selector that consumes `WorldState`, scored `TargetCandidate` values, and line-of-sight parameters.
+- Return the best clear candidate or `None`.
+- Keep prediction, swap, cooldown, locks, fallback discard, and command generation outside this step.
+- Add tests for choosing the first clear candidate, skipping blocked candidates, and returning no target when all are blocked.
 
-Do not migrate UI handling, mouse execution, or strategy in the same step unless there is a specific reason.
+Do not migrate UI handling, mouse execution, or command generation in the same step unless there is a specific reason.
 
 ## Design Rules To Preserve
 
