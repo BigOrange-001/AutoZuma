@@ -43,6 +43,10 @@ def test_score_basic_targets_scores_elimination_cluster():
     assert targets[0].y == 50.0
     assert targets[0].score > 0
     assert "size=2" in targets[0].reason
+    assert targets[0].track_id == 0
+    assert targets[0].track_idx == 32
+    assert targets[0].cluster_start_idx == 30
+    assert targets[0].cluster_end_idx == 32
 
 
 def test_score_basic_targets_scores_single_ball_as_pair_target():

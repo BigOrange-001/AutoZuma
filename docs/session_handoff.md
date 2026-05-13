@@ -25,8 +25,9 @@ The current refactor has completed the foundation layers:
 - Static world-state perception assembly.
 - Basic strategy target scoring.
 - Strategy line-of-sight filtering.
+- Strategy target selection.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, target selection, or command generation has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, prediction, swaps, fallback discard, or command generation has been done yet.
 
 ## Important Paths
 
@@ -58,6 +59,8 @@ Current model groups:
 - Perception result models: `LevelDetectionResult`, `GameRoiResult`
 - Launcher template models: `LauncherTemplate`, `LauncherTemplateSet`
 - Future gameplay skeletons: `BallEntity`, `Cluster`, `LauncherState`, `WorldState`, `TargetCandidate`, `Command`
+
+`TargetCandidate` now includes optional topology context fields for track id, target track index, and cluster start/end indices.
 
 ### Asset Loading And Validation
 
@@ -207,6 +210,18 @@ Behavior:
 - Returns `LineOfSightResult(is_clear, min_distance)`.
 - Does not yet select targets or generate commands.
 
+### Strategy Target Selection
+
+File: `src/autozuma/strategy/selection.py`
+
+Behavior:
+
+- Sorts scored `TargetCandidate` values by score.
+- Uses `check_line_of_sight()` to skip blocked candidates.
+- Passes target topology metadata into line-of-sight filtering.
+- Returns the best clear candidate or `None`.
+- Does not yet handle prediction, cooldown, swaps, fallback discard, or command generation.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -232,22 +247,22 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 59 passed
+- `pytest`: 64 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
 ## Next Recommended Step
 
-The next clean step is to add target selection that combines scored targets with line-of-sight filtering.
+The next clean step is to add first command generation from selected strategy targets.
 
 Suggested scope:
 
-- Add a pure selector that consumes `WorldState`, scored `TargetCandidate` values, and line-of-sight parameters.
-- Return the best clear candidate or `None`.
-- Keep prediction, swap, cooldown, locks, fallback discard, and command generation outside this step.
-- Add tests for choosing the first clear candidate, skipping blocked candidates, and returning no target when all are blocked.
+- Add a pure function that converts a selected `TargetCandidate` into a `Command`.
+- Keep it limited to a single `SHOOT` command at the candidate point.
+- Leave prediction, ROI-to-screen offset, double-shot, swap-shot, cooldown, action locks, and fallback discard for later slices.
+- Add tests for selected target -> shoot command and no target -> no-op.
 
-Do not migrate UI handling, mouse execution, or command generation in the same step unless there is a specific reason.
+Do not migrate UI handling, mouse execution, runtime cooldowns, swaps, or fallback discard in the same step unless there is a specific reason.
 
 ## Design Rules To Preserve
 

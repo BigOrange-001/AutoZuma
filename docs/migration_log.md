@@ -360,3 +360,27 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 59 tests.
 - `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Strategy Target Selection Baseline
+
+Added the first pure selector that combines scored targets with line-of-sight filtering.
+
+Added:
+
+- Optional topology context fields on `TargetCandidate`.
+- `src/autozuma/strategy/selection.py`.
+- Target-selection tests in `tests/test_target_selection.py`.
+
+Behavior:
+
+- `score_basic_targets()` now annotates targets with track id, center track index, and cluster start/end indices.
+- `select_best_clear_target()` sorts candidates by score and returns the highest-scoring candidate whose launcher-to-target path is clear.
+- Passes candidate topology metadata into line-of-sight filtering so target-cluster balls are not treated as blockers.
+- Returns `None` when no candidate has a clear path.
+- Still does not generate commands, apply prediction, inspect cooldowns, perform swaps, or run fallback discard logic.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 64 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.

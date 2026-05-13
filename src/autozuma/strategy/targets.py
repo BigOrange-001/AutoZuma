@@ -109,6 +109,10 @@ def _score_cluster(
             f"cluster track={cluster.track_id} color={cluster.color} size={cluster.size} "
             f"orthogonality={orthogonality:.3f} straightness={straightness:.3f}"
         ),
+        track_id=cluster.track_id,
+        track_idx=center_entity.track_idx,
+        cluster_start_idx=cluster.start_idx,
+        cluster_end_idx=cluster.end_idx,
     )
 
 
@@ -162,4 +166,3 @@ def _track_straightness(track: TrackGeometry, track_idx: int) -> float:
 
 def _clamp_track_idx(track_idx: int, track: TrackGeometry) -> int:
     return max(0, min(len(track.points) - 1, track_idx))
-

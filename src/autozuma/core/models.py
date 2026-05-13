@@ -170,6 +170,10 @@ class TargetCandidate:
     score: float
     target_type: str
     reason: str = ""
+    track_id: int | None = None
+    track_idx: int | None = None
+    cluster_start_idx: int | None = None
+    cluster_end_idx: int | None = None
 
 
 class CommandType(Enum):
