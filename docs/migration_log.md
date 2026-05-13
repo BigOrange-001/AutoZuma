@@ -236,3 +236,28 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 37 tests.
 - `.venv\Scripts\python -m ruff check .` passed.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Stateless Ball Entity Detection Baseline
+
+Migrated ball-chain entity detection from prototype `vision/detector.py::detect_entities_stateless`.
+
+Added:
+
+- `src/autozuma/vision/entities.py`.
+- Entity detection tests in `tests/test_entities.py`.
+
+Behavior:
+
+- Uses static background differencing to isolate foreground pixels.
+- Gates foreground pixels with a dense track mask.
+- Uses morphology and distance transform peaks to find ball centers.
+- Projects each peak to the nearest dense track point.
+- Applies start/end track exclusion distances.
+- Classifies each detected ball with the migrated HSV color classifier.
+- Returns `BallEntity` instances instead of dictionaries.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 41 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.

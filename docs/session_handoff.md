@@ -20,8 +20,9 @@ The current refactor has completed the foundation layers:
 - Static ROI extraction/alignment for detected static levels.
 - Launcher frog rotated template generation.
 - Launcher state detection and HSV color classification.
+- Stateless ball entity detection for static-background levels.
 
-No live game automation, mouse execution, GUI, frame capture, ball-chain detection, UI state handling, or strategy migration has been done yet.
+No live game automation, mouse execution, GUI, frame capture, cluster building, UI state handling, or strategy migration has been done yet.
 
 ## Important Paths
 
@@ -145,6 +146,18 @@ Behavior:
 - Returns `LauncherState(current_ball, next_ball, next_position, angle_degrees, confidence)`.
 - Returns unknown launcher state when templates are missing or the search ROI is clipped.
 
+### Stateless Ball Entity Detection
+
+File: `src/autozuma/vision/entities.py`
+
+Behavior:
+
+- Detects ball centers with static-background differencing, track masking, morphology, and distance-transform peaks.
+- Projects candidates onto dense `TrackGeometry` points.
+- Applies start/end exclusion distances.
+- Classifies entity colors with the migrated HSV helper.
+- Returns `BallEntity` tuples.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -170,21 +183,20 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 37 passed
+- `pytest`: 41 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
 ## Next Recommended Step
 
-The next clean step is to migrate stateless ball-chain detection.
+The next clean step is to migrate topological cluster building.
 
 Suggested scope:
 
-- Add a clean version of prototype `vision/detector.py::detect_entities_stateless`.
-- Use `LevelRuntimeAssets.background`, `LevelGeometry`, and migrated color classification.
-- Return `BallEntity` tuples instead of dictionaries.
-- Keep cluster building as a separate follow-up unless the detection slice stays small.
-- Add controlled tests first, then add gameplay screenshot fixtures when available.
+- Add a clean version of prototype `vision/detector.py::build_topological_clusters`.
+- Consume `BallEntity` tuples and return `Cluster` instances.
+- Preserve same-track, same-color, close-track-index grouping behavior.
+- Add tests for empty input, split colors, split tracks, and gap threshold behavior.
 
 Do not migrate UI handling, mouse execution, or strategy in the same step unless there is a specific reason.
 
