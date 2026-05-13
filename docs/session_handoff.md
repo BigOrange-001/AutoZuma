@@ -21,8 +21,10 @@ The current refactor has completed the foundation layers:
 - Launcher frog rotated template generation.
 - Launcher state detection and HSV color classification.
 - Stateless ball entity detection for static-background levels.
+- Topological cluster building from detected ball entities.
+- Static world-state perception assembly.
 
-No live game automation, mouse execution, GUI, frame capture, cluster building, UI state handling, or strategy migration has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, strategy migration, or command generation has been done yet.
 
 ## Important Paths
 
@@ -158,6 +160,28 @@ Behavior:
 - Classifies entity colors with the migrated HSV helper.
 - Returns `BallEntity` tuples.
 
+### Topological Cluster Building
+
+File: `src/autozuma/vision/clusters.py`
+
+Behavior:
+
+- Consumes ordered `BallEntity` instances.
+- Groups adjacent entities by same track, same color, and close track-index gap.
+- Preserves the prototype strict threshold: `track_idx` gap must be less than `85`.
+- Returns immutable `Cluster` instances.
+
+### Static World-State Perception
+
+File: `src/autozuma/vision/world_state.py`
+
+Behavior:
+
+- Combines static ROI extraction, launcher state detection, entity detection, and cluster building.
+- Accepts explicit `LevelRuntimeAssets` and `LauncherTemplateSet` inputs.
+- Returns `WorldState(level_id, launcher, entities, clusters)`.
+- Currently supports only static-background levels; `space` remains a special detection gap.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -183,20 +207,20 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 41 passed
+- `pytest`: 48 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
 ## Next Recommended Step
 
-The next clean step is to migrate topological cluster building.
+The next clean step is to migrate the first strategy/target-scoring slice against `WorldState`.
 
 Suggested scope:
 
-- Add a clean version of prototype `vision/detector.py::build_topological_clusters`.
-- Consume `BallEntity` tuples and return `Cluster` instances.
-- Preserve same-track, same-color, close-track-index grouping behavior.
-- Add tests for empty input, split colors, split tracks, and gap threshold behavior.
+- Start with a pure function that consumes `WorldState` plus strategy parameters and returns scored `TargetCandidate` values.
+- Preserve the prototype's normal elimination and pair-insertion behavior before migrating rescue/endgame/coin special cases.
+- Keep mouse execution and live process state outside this step.
+- Add focused tests around color matching, cluster-size scoring, and no-target behavior.
 
 Do not migrate UI handling, mouse execution, or strategy in the same step unless there is a specific reason.
 

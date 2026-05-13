@@ -261,3 +261,50 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 41 tests.
 - `.venv\Scripts\python -m ruff check .` passed.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Topological Cluster Building Baseline
+
+Migrated cluster construction from prototype `vision/detector.py::build_topological_clusters`.
+
+Added:
+
+- `src/autozuma/vision/clusters.py`.
+- Cluster-building tests in `tests/test_clusters.py`.
+
+Behavior:
+
+- Consumes ordered `BallEntity` instances and returns immutable `Cluster` instances.
+- Groups adjacent entities only when they remain on the same track, have the same color, and have a track-index gap less than `85`.
+- Preserves the prototype's strict threshold behavior: a gap of `84` joins, while a gap of `85` starts a new cluster.
+- Empty input returns an empty tuple.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 46 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Static World-State Perception Baseline
+
+Added the first orchestration layer that assembles the already-migrated static perception slices.
+
+Added:
+
+- `src/autozuma/vision/world_state.py`.
+- World-state orchestration tests in `tests/test_world_state.py`.
+
+Behavior:
+
+- Accepts an explicit raw BGR frame, `LevelRuntimeAssets`, and `LauncherTemplateSet`.
+- Extracts the aligned static ROI.
+- Detects launcher state from the aligned ROI and level frog pivot.
+- Detects ball entities for all level tracks.
+- Builds topological clusters from detected entities.
+- Returns `WorldState(level_id, launcher, entities, clusters)`.
+- Still rejects `space` and any level without a static background through the static ROI extraction path.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 48 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
