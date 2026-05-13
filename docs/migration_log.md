@@ -384,3 +384,24 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 64 tests.
 - `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Basic Strategy Command Generation Baseline
+
+Added the first pure conversion from selected target to command object.
+
+Added:
+
+- `src/autozuma/strategy/commands.py`.
+- Basic command generation tests in `tests/test_strategy_commands.py`.
+
+Behavior:
+
+- `command_for_selected_target(None)` returns `CommandType.NO_OP`.
+- A selected `TargetCandidate` returns a single `CommandType.SHOOT` command at the candidate's ROI-local point.
+- Does not yet apply ROI-to-screen offsets, prediction, double shots, swaps, cooldowns, action locks, virtual balls, fallback discard, or mouse execution.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 66 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.

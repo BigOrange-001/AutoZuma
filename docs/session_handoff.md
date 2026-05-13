@@ -26,8 +26,9 @@ The current refactor has completed the foundation layers:
 - Basic strategy target scoring.
 - Strategy line-of-sight filtering.
 - Strategy target selection.
+- Basic strategy command generation.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, prediction, swaps, fallback discard, or command generation has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, prediction, swaps, fallback discard, ROI-to-screen command mapping, or command execution has been done yet.
 
 ## Important Paths
 
@@ -222,6 +223,16 @@ Behavior:
 - Returns the best clear candidate or `None`.
 - Does not yet handle prediction, cooldown, swaps, fallback discard, or command generation.
 
+### Basic Strategy Command Generation
+
+File: `src/autozuma/strategy/commands.py`
+
+Behavior:
+
+- Converts a selected `TargetCandidate` into a `CommandType.SHOOT` command at the ROI-local target point.
+- Converts missing target selection into `CommandType.NO_OP`.
+- Does not yet handle ROI-to-screen offsets, prediction, double shots, swaps, cooldowns, locks, fallback discard, or mouse execution.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -247,20 +258,20 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 64 passed
+- `pytest`: 66 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
 ## Next Recommended Step
 
-The next clean step is to add first command generation from selected strategy targets.
+The next clean step is to add ROI-to-screen command mapping.
 
 Suggested scope:
 
-- Add a pure function that converts a selected `TargetCandidate` into a `Command`.
-- Keep it limited to a single `SHOOT` command at the candidate point.
-- Leave prediction, ROI-to-screen offset, double-shot, swap-shot, cooldown, action locks, and fallback discard for later slices.
-- Add tests for selected target -> shoot command and no target -> no-op.
+- Convert ROI-local command target points to screen-frame coordinates using `GameRoiResult.offset`.
+- Keep the conversion pure and independent from mouse execution.
+- Preserve `NO_OP` unchanged.
+- Add tests for `SHOOT` target offsetting and commands without targets.
 
 Do not migrate UI handling, mouse execution, runtime cooldowns, swaps, or fallback discard in the same step unless there is a specific reason.
 
