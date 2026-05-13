@@ -211,3 +211,28 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 32 tests.
 - `.venv\Scripts\python -m ruff check .` passed.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Launcher State Detection Baseline
+
+Migrated launcher state detection from prototype `vision/detector.py::detect_launcher_state_residual` and its required color helper.
+
+Added:
+
+- `src/autozuma/vision/colors.py`.
+- `src/autozuma/vision/launcher_state.py`.
+- Color classification tests in `tests/test_colors.py`.
+- Launcher state tests in `tests/test_launcher_state.py`.
+
+Behavior:
+
+- Uses `LauncherTemplateSet` instead of prototype global `FROG_TEMPLATES`.
+- Finds the best launcher angle by minimizing grayscale residual over each template match mask.
+- Classifies current and next ball colors using the migrated HSV target-color logic.
+- Returns `LauncherState` instead of a dictionary.
+- Returns an explicit unknown state when templates are missing or the launcher search ROI is clipped.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 37 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.

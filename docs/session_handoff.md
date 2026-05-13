@@ -19,8 +19,9 @@ The current refactor has completed the foundation layers:
 - Static level recognition for migrated static-background levels.
 - Static ROI extraction/alignment for detected static levels.
 - Launcher frog rotated template generation.
+- Launcher state detection and HSV color classification.
 
-No live game automation, mouse execution, GUI, frame capture, ball detection, launcher state detection, color classification, or strategy migration has been done yet.
+No live game automation, mouse execution, GUI, frame capture, ball-chain detection, UI state handling, or strategy migration has been done yet.
 
 ## Important Paths
 
@@ -130,6 +131,20 @@ Behavior:
 - Preserves prototype defaults: search radius `50`, angle step `5`.
 - Generates grayscale templates, match masks, and subtraction masks for angles `0..355`.
 
+### Launcher State Detection
+
+Files:
+
+- `src/autozuma/vision/colors.py`
+- `src/autozuma/vision/launcher_state.py`
+
+Behavior:
+
+- Detects launcher angle by comparing a frog-pivot ROI against `LauncherTemplateSet`.
+- Uses migrated HSV color classification for current and next ball positions.
+- Returns `LauncherState(current_ball, next_ball, next_position, angle_degrees, confidence)`.
+- Returns unknown launcher state when templates are missing or the search ROI is clipped.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -155,23 +170,23 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 32 passed
+- `pytest`: 37 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
 ## Next Recommended Step
 
-The next clean step is to migrate launcher state detection.
+The next clean step is to migrate stateless ball-chain detection.
 
 Suggested scope:
 
-- Add a clean version of prototype `vision/detector.py::detect_launcher_state_residual`.
-- Use `LauncherTemplateSet` instead of `globals.FROG_TEMPLATES`.
-- Keep color classification as a separate helper or small module if needed.
-- Return the existing `LauncherState` model instead of a dictionary.
-- Add tests using controlled ROI fixtures before relying on live gameplay screenshots.
+- Add a clean version of prototype `vision/detector.py::detect_entities_stateless`.
+- Use `LevelRuntimeAssets.background`, `LevelGeometry`, and migrated color classification.
+- Return `BallEntity` tuples instead of dictionaries.
+- Keep cluster building as a separate follow-up unless the detection slice stays small.
+- Add controlled tests first, then add gameplay screenshot fixtures when available.
 
-Do not migrate ball-chain detection, UI handling, mouse execution, or strategy in the same step unless there is a specific reason.
+Do not migrate UI handling, mouse execution, or strategy in the same step unless there is a specific reason.
 
 ## Design Rules To Preserve
 
