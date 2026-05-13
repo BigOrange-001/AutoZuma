@@ -1,0 +1,28 @@
+[project]
+name = "autozuma-next"
+version = "0.1.0"
+description = "Clean refactor target for the AutoZuma visual automation prototype."
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "mss",
+    "pywin32",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[project.scripts]
+autozuma-validate-assets = "autozuma.cli.validate_assets:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
