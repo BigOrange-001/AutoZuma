@@ -20,6 +20,10 @@ class InvalidTopologyError(AssetLoadError):
     """Raised when a topology JSON file does not match the expected shape."""
 
 
+class RoiExtractionError(AutoZumaError):
+    """Raised when a game ROI cannot be extracted from a frame."""
+
+
 @dataclass(frozen=True)
 class Point:
     x: float
@@ -96,6 +100,13 @@ class LevelDetectionResult:
     level_id: str
     confidence: float
     match_location: Point
+
+
+@dataclass(frozen=True)
+class GameRoiResult:
+    frame: Any
+    offset: Point
+    confidence: float
 
 
 @dataclass(frozen=True)

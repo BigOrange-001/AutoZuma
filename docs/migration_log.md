@@ -162,3 +162,28 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 24 tests.
 - `.venv\Scripts\python -m ruff check .` passed.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Static ROI Extraction Baseline
+
+Migrated the next perception slice from prototype `vision/detector.py::extract_game_roi_ncc`.
+
+Added:
+
+- `GameRoiResult` model.
+- `RoiExtractionError` domain exception.
+- `src/autozuma/vision/roi.py`.
+- ROI extraction tests in `tests/test_roi.py`.
+
+Behavior:
+
+- Uses `LevelRuntimeAssets.background` instead of prototype global background data.
+- Locates a static level background inside a larger raw BGR frame with `cv2.TM_CCOEFF_NORMED`.
+- Returns a copied ROI frame, top-left offset, and NCC confidence.
+- Rejects frames smaller than the static background.
+- Rejects `space` and other levels without a static background.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 28 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.

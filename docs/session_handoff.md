@@ -17,8 +17,9 @@ The current refactor has completed the foundation layers:
 - Pure topology geometry generation.
 - Runtime asset registry that loads topology, derived geometry, backgrounds, launcher template, and UI templates.
 - Static level recognition for migrated static-background levels.
+- Static ROI extraction/alignment for detected static levels.
 
-No live game automation, mouse execution, GUI, frame capture, ROI alignment, ball detection, launcher detection, or strategy migration has been done yet.
+No live game automation, mouse execution, GUI, frame capture, ball detection, launcher detection, or strategy migration has been done yet.
 
 ## Important Paths
 
@@ -47,7 +48,7 @@ Current model groups:
 - Asset/topology models: `Point`, `TrackControlPoint`, `LevelTopology`, `LevelAssetRef`
 - Geometry models: `TrackGeometry`, `LevelGeometry`
 - Runtime asset models: `ImageAsset`, `LevelRuntimeAssets`, `TemplateAssets`, `AssetRegistry`
-- Perception result models: `LevelDetectionResult`
+- Perception result models: `LevelDetectionResult`, `GameRoiResult`
 - Future gameplay skeletons: `BallEntity`, `Cluster`, `LauncherState`, `WorldState`, `TargetCandidate`, `Command`
 
 ### Asset Loading And Validation
@@ -104,6 +105,18 @@ Behavior:
 - Returns `LevelDetectionResult(level_id, confidence, match_location)` or `None`.
 - Skips `space` because it requires special dynamic-background detection.
 
+### Static ROI Extraction
+
+File: `src/autozuma/vision/roi.py`
+
+Behavior:
+
+- Locates a static level background inside a raw BGR frame using grayscale template matching.
+- Uses `LevelRuntimeAssets.background` instead of prototype global background data.
+- Returns `GameRoiResult(frame, offset, confidence)`.
+- Rejects frames smaller than the static background.
+- Rejects `space` because it has no static background.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -129,23 +142,22 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 24 passed
+- `pytest`: 28 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
 ## Next Recommended Step
 
-The next clean step is to migrate ROI extraction/alignment for a detected static level.
+The next clean step is to migrate launcher template cache generation.
 
 Suggested scope:
 
-- Add a clean version of prototype `vision/detector.py::extract_game_roi_ncc`.
-- Use `LevelRuntimeAssets.background` from `AssetRegistry` instead of global background data.
-- Keep static-level recognition and ROI alignment as separate functions.
-- Return a structured result containing the cropped ROI and top-left offset.
-- Add tests that embed a real migrated background inside a larger frame.
+- Add a clean version of prototype `vision/detector.py::init_template_cache`.
+- Store generated rotated launcher templates in an explicit model instead of `globals.FROG_TEMPLATES`.
+- Preserve the current angle step and mask generation behavior.
+- Add tests for angle count, template dimensions, and mask presence.
 
-Do not migrate ball detection, launcher detection, UI handling, or strategy in the same step unless there is a specific reason.
+Do not migrate launcher state detection, ball detection, UI handling, or strategy in the same step unless there is a specific reason.
 
 ## Design Rules To Preserve
 
