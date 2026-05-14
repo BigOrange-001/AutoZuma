@@ -38,8 +38,9 @@ The current refactor has completed the foundation layers:
 - Action tracker state for deadzones, cluster locks, and virtual balls.
 - Lock-aware target scoring using action deadzones and cluster locks.
 - Pure virtual-ball cluster-size injection.
+- Pure command-result action updates and cooldown planning.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, command-result action updates, swap cooldown/execution, runtime cooldowns, or command execution has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, swap cooldown/execution, runtime cooldown gating, or command execution has been done yet.
 
 ## Important Paths
 
@@ -327,7 +328,26 @@ Behavior:
 - Preserves prototype virtual-ball injection rule: same track, same color, and `cluster.start_idx - 30 <= virtual.track_idx <= cluster.end_idx + 30`.
 - Applies each active virtual ball to the first matching cluster, matching the prototype's `break` behavior.
 - Provides pruning of expired action-memory entries.
-- Does not yet update action state after selected commands.
+- Command-result updates are handled separately in `src/autozuma/strategy/action_updates.py`.
+
+### Command Outcome Action Updates
+
+File: `src/autozuma/strategy/action_updates.py`
+
+Behavior:
+
+- Represents post-command runtime planning with explicit immutable `CommandOutcomeState`.
+- Carries `ActionTrackerState`, `CoinTrackerState`, `last_swap_time`, `next_fire_ready_time`, and `last_fire_time`.
+- Uses explicit `current_time`; no hidden `time.time()` reads.
+- Preserves prototype bullet speed default `800.0`, fire cooldown default `0.3s`, swap extra fire delay `0.05s`, combo hang defaults `0.8s + combo_depth * 0.6s`, direct coin lock `1.0s`, and breakthrough coin lock `2.0s`.
+- `NO_OP` and `UI_CLICK` prune expired state but do not advance fire or swap timestamps.
+- `direct_coin` locks the coin, adds a travel-time deadzone, and plans normal fire cooldown.
+- `breakthrough_coin` locks the secondary coin, adds a travel-time deadzone at the breakthrough aim point, and plans next fire after double-shot delay plus fire cooldown.
+- `COMBO` adds the prototype long target cluster lock, target deadzone, and adjacent non-unknown cluster locks.
+- `ELIM` and `ROLLBACK_ELIM` add only a travel-time deadzone and normal fire cooldown.
+- `PAIR` adds a travel-time deadzone and virtual ball using the actually fired ball color, including next-ball color for swapped shots.
+- `DISCARD` advances only normal fire cooldown.
+- Does not sleep, execute mouse input, enforce fire readiness, enforce swap cooldown, or own live-loop state transitions.
 
 ### Lock-Aware Target Scoring
 
@@ -410,24 +430,24 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 139 passed
+- `pytest`: 145 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
-Last targeted action integration check:
+Last targeted command outcome/action integration check:
 
-- `.venv\Scripts\python -m pytest tests\test_strategy_actions.py tests\test_strategy_targets.py`: 25 passed
+- `.venv\Scripts\python -m pytest tests\test_strategy_action_updates.py tests\test_strategy_actions.py tests\test_strategy_targets.py tests\test_vision_coins.py`: 44 passed
 
 ## Next Recommended Step
 
-The next clean step is to migrate pure command-result action updates and cooldown planning.
+The next clean step is to expose a richer pure frame-decision result and then wire cooldown/action state through it.
 
 Suggested scope:
 
-- Given a selected command/target class, compute updated `ActionTrackerState`, coin locks, swap timestamp, and next fire-ready time.
-- Preserve prototype behavior for combo locks, adjacent combo locks, elim deadzones, pair virtual balls, direct coin locks, and breakthrough coin locks.
-- Keep actual sleeping, right-click execution, and mouse input outside this slice.
-- Do not add live capture, mouse execution, GUI, runtime cooldowns, or UI handling in the same step unless there is a specific reason.
+- Return the selected target, swap choice, world state, ROI result, and command from the pure static-frame pipeline, not only the final mapped command.
+- Add a pure stateful wrapper that accepts `CommandOutcomeState`, applies action-state-aware scoring, gates fire readiness using `next_fire_ready_time`, enforces swap readiness using `last_swap_time`, and calls `apply_command_outcome()` only when a command is actually emitted.
+- Preserve the existing `decide_static_frame_command()` API as a convenience wrapper if possible.
+- Keep actual sleeping, right-click execution, mouse input, live capture, GUI, and UI handling outside this slice.
 
 ## Design Rules To Preserve
 

@@ -2,6 +2,50 @@
 
 ## 2026-05-14
 
+### Command Outcome Action Updates Baseline
+
+Migrated the pure command-result action-memory and cooldown-planning slice from the
+prototype decision loop.
+
+Added:
+
+- `src/autozuma/strategy/action_updates.py`.
+- `CommandOutcomeState` for explicit action tracker, coin tracker, swap timestamp,
+  fire-ready timestamp, and last-fire timestamp state.
+- `CommandOutcomeParams` for bullet speed, fire cooldown, swap extra delay, combo
+  hang timing, combo lock ranges, and coin lock durations.
+- Command outcome tests in `tests/test_strategy_action_updates.py`.
+
+Behavior:
+
+- `NO_OP` and `UI_CLICK` prune expired pure state but do not advance fire or swap
+  timestamps.
+- Any shoot command advances `last_fire_time`; swapped shoot variants also update
+  `last_swap_time` and add the prototype `0.05s` extra fire delay.
+- `direct_coin` locks the coin for `1.0s`, adds a travel-time deadzone, and uses
+  normal fire cooldown.
+- `breakthrough_coin` locks the secondary coin for `2.0s`, adds a travel-time
+  deadzone at the breakthrough aim point, and plans next fire after double-shot
+  delay plus fire cooldown.
+- `COMBO` adds the prototype long cluster lock centered on the target track index,
+  deadzones the aim point for travel plus combo hang time, and locks adjacent
+  non-unknown clusters with the extra adjacent duration.
+- `ELIM` and `ROLLBACK_ELIM` add only a travel-time deadzone and normal fire
+  cooldown.
+- `PAIR` adds a travel-time deadzone plus a virtual ball using the actually fired
+  color, including the next-ball color for swapped shots.
+- `DISCARD` advances only normal fire cooldown.
+- Keeps the slice pure and deterministic: no sleeping, right-click execution, mouse
+  input, live capture, or UI handling.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_strategy_action_updates.py tests\test_strategy_actions.py tests\test_strategy_targets.py tests\test_vision_coins.py` passed: 44 tests.
+- `.venv\Scripts\python -m pytest` passed: 145 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
 ### Strategy Command Variants Baseline
 
 Migrated the pure command-object representation for prototype double-shot command variants.
