@@ -37,13 +37,27 @@ def score_basic_targets(
     params: TargetScoringParams = TargetScoringParams(),
 ) -> tuple[TargetCandidate, ...]:
     """Score basic same-color elimination and pair-insertion targets."""
-    current_color = world_state.launcher.current_ball
-    if current_color == UNKNOWN_COLOR:
+    return score_basic_targets_for_color(
+        world_state=world_state,
+        level=level,
+        target_color=world_state.launcher.current_ball,
+        params=params,
+    )
+
+
+def score_basic_targets_for_color(
+    world_state: WorldState,
+    level: LevelRuntimeAssets,
+    target_color: str,
+    params: TargetScoringParams = TargetScoringParams(),
+) -> tuple[TargetCandidate, ...]:
+    """Score basic targets as if the launcher ball had the given color."""
+    if target_color == UNKNOWN_COLOR:
         return ()
 
     candidates: list[TargetCandidate] = []
     for cluster in world_state.clusters:
-        if cluster.color != current_color:
+        if cluster.color != target_color:
             continue
         if not cluster.entities:
             continue

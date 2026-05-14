@@ -16,6 +16,7 @@ from autozuma.strategy.targets import (
     PAIR_TARGET,
     TargetScoringParams,
     score_basic_targets,
+    score_basic_targets_for_color,
 )
 
 
@@ -29,6 +30,23 @@ def test_score_basic_targets_ignores_clusters_with_different_color():
     world_state = _world_state(current_ball="red", clusters=(_cluster("blue", 2, 30),))
 
     assert score_basic_targets(world_state, _level()) == ()
+
+
+def test_score_basic_targets_for_color_scores_next_ball_color():
+    red_cluster = _cluster("red", 1, 30)
+    blue_cluster = _cluster("blue", 2, 90)
+    world_state = _world_state(current_ball="red", clusters=(red_cluster, blue_cluster))
+
+    targets = score_basic_targets_for_color(
+        world_state=world_state,
+        level=_level(),
+        target_color="blue",
+        params=_params(),
+    )
+
+    assert len(targets) == 1
+    assert targets[0].target_type == ELIM_TARGET
+    assert targets[0].cluster_start_idx == 90
 
 
 def test_score_basic_targets_scores_elimination_cluster():

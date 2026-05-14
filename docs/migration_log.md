@@ -429,3 +429,83 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 69 tests.
 - `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Static Frame Decision Pipeline Baseline
+
+Added the first pure single-frame decision pipeline for static-background levels.
+
+Added:
+
+- `src/autozuma/decision/__init__.py`.
+- `src/autozuma/decision/static_frame.py`.
+- `detect_static_world_state_from_roi()` in `src/autozuma/vision/world_state.py`.
+- Static-frame decision tests in `tests/test_static_frame_decision.py`.
+
+Behavior:
+
+- Accepts one raw BGR frame, explicit `LevelRuntimeAssets`, `LauncherTemplateSet`, and decision params.
+- Extracts the aligned static game ROI once.
+- Builds `WorldState` from the aligned ROI.
+- Scores basic targets, filters by line of sight, converts the selected target into a command, and maps ROI-local target coordinates back to screen-frame coordinates.
+- Returns `CommandType.NO_OP` when no target is selected.
+- Remains pure and single-frame: no live capture, mouse execution, cooldowns, locks, swaps, fallback discard, or UI handling.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 72 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Strategy Prediction Baseline
+
+Migrated the pure target-coordinate prediction slice from the prototype command-selection loop.
+
+Added:
+
+- `src/autozuma/strategy/prediction.py`.
+- Prediction parameters on `StaticFrameDecisionParams`.
+- Prediction tests in `tests/test_strategy_prediction.py`.
+
+Behavior:
+
+- Uses the prototype prediction formula: `offset_idx = int(PREDICT_MULT * distance_to_frog)`.
+- Preserves the prototype default `PREDICT_MULT` value of `0.05`.
+- Clamps predicted track indices to the dense track bounds.
+- Replaces candidate coordinates with the dense track point at the predicted index.
+- Updates candidate `track_idx` so line-of-sight filtering checks the predicted shot point.
+- Leaves candidates without topology metadata unchanged.
+- Keeps prediction pure and stateless: no bullet travel time, cooldowns, virtual balls, mouse execution, swaps, fallback discard, or runtime memory.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 77 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Strategy Swap Decision Baseline
+
+Migrated the pure score-comparison portion of the prototype swap decision.
+
+Added:
+
+- `src/autozuma/strategy/swap.py`.
+- `score_basic_targets_for_color()` in `src/autozuma/strategy/targets.py`.
+- Swap parameters on `StaticFrameDecisionParams`.
+- Swap command support in `src/autozuma/strategy/commands.py`.
+- Swap tests in `tests/test_strategy_swap.py`.
+
+Behavior:
+
+- Scores current-ball candidates and next-ball candidates separately.
+- Uses the prototype swap comparison threshold: `next_best_score >= current_best_score * 1.15`.
+- Requires next-ball score to be positive.
+- Does not swap when the next ball is unknown or matches the current ball.
+- Selects the next-ball candidate set when swapping, then applies existing prediction and line-of-sight selection.
+- Emits `CommandType.SWAP_SHOOT` when a swapped target is selected.
+- Keeps swap logic pure and stateless: no swap cooldown, right-click execution, mouse input, runtime locks, or UI handling.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 85 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.

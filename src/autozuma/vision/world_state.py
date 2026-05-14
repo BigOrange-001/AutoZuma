@@ -20,13 +20,30 @@ def detect_static_world_state(
 ) -> WorldState:
     """Detect the playable world state for a static-background level."""
     roi_result = extract_game_roi(frame_bgr, level)
-    launcher = detect_launcher_state(
+    return detect_static_world_state_from_roi(
         frame_roi_bgr=roi_result.frame,
+        level=level,
+        launcher_templates=launcher_templates,
+        p_start_exclude=p_start_exclude,
+        p_end_exclude=p_end_exclude,
+    )
+
+
+def detect_static_world_state_from_roi(
+    frame_roi_bgr: np.ndarray,
+    level: LevelRuntimeAssets,
+    launcher_templates: LauncherTemplateSet,
+    p_start_exclude: float = 0.0,
+    p_end_exclude: float = 0.0,
+) -> WorldState:
+    """Detect the playable world state from an already aligned static-level ROI."""
+    launcher = detect_launcher_state(
+        frame_roi_bgr=frame_roi_bgr,
         frog_pivot=level.topology.frog_pivot,
         template_set=launcher_templates,
     )
     entities = detect_level_entities(
-        frame_roi_bgr=roi_result.frame,
+        frame_roi_bgr=frame_roi_bgr,
         level=level,
         p_start_exclude=p_start_exclude,
         p_end_exclude=p_end_exclude,

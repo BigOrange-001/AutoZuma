@@ -28,8 +28,11 @@ The current refactor has completed the foundation layers:
 - Strategy target selection.
 - Basic strategy command generation.
 - ROI-to-screen command coordinate mapping.
+- Pure static-frame decision pipeline for static-background levels.
+- Pure target-coordinate prediction along dense track geometry.
+- Pure swap decision based on current-ball versus next-ball target scores.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, prediction, swaps, fallback discard, runtime cooldowns, or command execution has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, swap cooldown/execution, fallback discard, runtime cooldowns, or command execution has been done yet.
 
 ## Important Paths
 
@@ -185,6 +188,7 @@ File: `src/autozuma/vision/world_state.py`
 Behavior:
 
 - Combines static ROI extraction, launcher state detection, entity detection, and cluster building.
+- Also exposes `detect_static_world_state_from_roi()` for callers that have already extracted an aligned ROI and need the ROI offset for downstream coordinate mapping.
 - Accepts explicit `LevelRuntimeAssets` and `LauncherTemplateSet` inputs.
 - Returns `WorldState(level_id, launcher, entities, clusters)`.
 - Currently supports only static-background levels; `space` remains a special detection gap.
@@ -199,7 +203,7 @@ Behavior:
 - Produces `TargetCandidate` values for basic `ELIM` and `PAIR` targets.
 - Keeps scoring pure and stateless with explicit `TargetScoringParams`.
 - Uses distance, shot/track orthogonality, local straightness, and bad-geometry penalty terms from the prototype baseline.
-- Does not yet handle combo depth, rollback, coins, line-of-sight, swaps, prediction, locks, or command generation.
+- Does not yet handle combo depth, rollback, coins, line-of-sight, locks, or command generation.
 
 ### Strategy Line-Of-Sight
 
@@ -222,7 +226,33 @@ Behavior:
 - Uses `check_line_of_sight()` to skip blocked candidates.
 - Passes target topology metadata into line-of-sight filtering.
 - Returns the best clear candidate or `None`.
-- Does not yet handle prediction, cooldown, swaps, fallback discard, or command generation.
+- Does not yet handle cooldown, swaps, fallback discard, or command generation.
+
+### Strategy Prediction
+
+File: `src/autozuma/strategy/prediction.py`
+
+Behavior:
+
+- Applies the prototype target prediction formula to scored `TargetCandidate` values.
+- Computes `offset_idx = int(predict_multiplier * distance_to_frog)`.
+- Preserves the prototype default `predict_multiplier=0.05`.
+- Clamps predicted indices to dense track bounds.
+- Replaces target coordinates with the predicted dense track point and updates `track_idx` for downstream line-of-sight filtering.
+- Leaves targets without topology metadata unchanged.
+- Does not compute travel time, update virtual balls, enforce cooldowns, perform swaps, or execute commands.
+
+### Strategy Swap Decision
+
+File: `src/autozuma/strategy/swap.py`
+
+Behavior:
+
+- Compares current-ball and next-ball target candidate sets.
+- Preserves the prototype threshold: swap when `next_best_score >= current_best_score * 1.15` and the next score is positive.
+- Does not swap when the next ball is unknown or the same color as the current ball.
+- Returns a pure `SwapDecision` with `should_swap`, selected candidates, best scores, and a reason.
+- Does not handle swap cooldown, right-click execution, runtime state, or UI handling.
 
 ### Basic Strategy Command Generation
 
@@ -231,8 +261,9 @@ File: `src/autozuma/strategy/commands.py`
 Behavior:
 
 - Converts a selected `TargetCandidate` into a `CommandType.SHOOT` command at the ROI-local target point.
+- Converts a selected swapped target into `CommandType.SWAP_SHOOT`.
 - Converts missing target selection into `CommandType.NO_OP`.
-- Does not yet handle ROI-to-screen offsets, prediction, double shots, swaps, cooldowns, locks, fallback discard, or mouse execution.
+- Does not yet handle ROI-to-screen offsets, double shots, cooldowns, locks, fallback discard, or mouse execution.
 
 ### ROI-To-Screen Command Mapping
 
@@ -245,6 +276,20 @@ Behavior:
 - Preserves command type and delay.
 - Leaves targetless commands targetless.
 - Does not execute mouse input or enforce runtime cooldowns.
+
+### Static Frame Decision Pipeline
+
+File: `src/autozuma/decision/static_frame.py`
+
+Behavior:
+
+- Accepts a raw BGR frame, `LevelRuntimeAssets`, `LauncherTemplateSet`, and `StaticFrameDecisionParams`.
+- Extracts the static ROI once, detects world state from that ROI, scores basic targets, selects the best clear target, generates a ROI-local command, and maps it back to screen-frame coordinates.
+- Scores both current-ball and next-ball targets and applies pure swap decision before prediction.
+- Applies pure target prediction between scoring and line-of-sight selection.
+- Returns a screen-frame `Command`.
+- Returns `CommandType.NO_OP` when no target is selected.
+- Remains pure and single-frame: no live capture, mouse execution, cooldowns, locks, swaps, fallback discard, or UI handling.
 
 ## Migrated Assets
 
@@ -271,22 +316,21 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 69 passed
+- `pytest`: 85 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
 ## Next Recommended Step
 
-The next clean step is to add a static-frame decision pipeline that composes perception, scoring, selection, command generation, and ROI-to-screen mapping.
+The next clean step is to migrate another pure strategy decision slice.
 
 Suggested scope:
 
-- Keep it pure and single-frame: no live capture, mouse execution, cooldowns, or locks.
-- Accept a raw frame, level assets, launcher templates, and strategy parameters.
-- Return a screen-frame `Command`.
-- Add tests with mocked or synthetic perception outputs for target and no-target paths.
+- Keep it pure and single-frame.
+- Add one behavior slice at a time, with tests: combo/rollback scoring or fallback discard are reasonable candidates.
+- Do not add live capture, mouse execution, GUI, runtime cooldowns, or UI handling in the same step unless there is a specific reason.
 
-Do not migrate UI handling, mouse execution, runtime cooldowns, swaps, or fallback discard in the same step unless there is a specific reason.
+Combo/rollback scoring is likely the cleanest next step because it extends target scoring without introducing runtime execution concerns.
 
 ## Design Rules To Preserve
 
