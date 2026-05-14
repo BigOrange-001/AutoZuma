@@ -17,10 +17,14 @@ from autozuma.vision.colors import UNKNOWN_COLOR
 
 ELIM_TARGET = "ELIM"
 PAIR_TARGET = "PAIR"
+COMBO_TARGET = "COMBO"
+ROLLBACK_ELIM_TARGET = "ROLLBACK_ELIM"
 
 
 @dataclass(frozen=True)
 class TargetScoringParams:
+    combo_priority: float = 10000.0
+    rollback_elim_priority: float = 3000.0
     elim_priority: float = 1000.0
     pair_priority: float = 100.0
     distance_weight: float = 3.5
@@ -29,6 +33,8 @@ class TargetScoringParams:
     bad_geometry_penalty: float = 5.0
     min_orthogonality: float = 0.42
     min_straightness: float = 0.86
+    combo_depth_bonus: float = 0.6
+    max_combo_depth_bonus: float = 2.0
 
 
 def score_basic_targets(
@@ -56,17 +62,26 @@ def score_basic_targets_for_color(
         return ()
 
     candidates: list[TargetCandidate] = []
-    for cluster in world_state.clusters:
+    for cluster_idx, cluster in enumerate(world_state.clusters):
         if cluster.color != target_color:
             continue
         if not cluster.entities:
+            continue
+        if _is_adjacent_to_same_color_cluster(world_state.clusters, cluster_idx, target_color):
             continue
 
         track = _find_track(level, cluster.track_id)
         if track is None:
             continue
 
-        candidate = _score_cluster(cluster, track, level.topology.frog_pivot, params)
+        candidate = _score_cluster(
+            clusters=world_state.clusters,
+            cluster_idx=cluster_idx,
+            track=track,
+            target_color=target_color,
+            frog_pivot=level.topology.frog_pivot,
+            params=params,
+        )
         candidates.append(candidate)
 
     candidates.sort(key=lambda target: target.score, reverse=True)
@@ -81,18 +96,25 @@ def _find_track(level: LevelRuntimeAssets, track_id: int) -> TrackGeometry | Non
 
 
 def _score_cluster(
-    cluster: Cluster,
+    clusters: tuple[Cluster, ...],
+    cluster_idx: int,
     track: TrackGeometry,
+    target_color: str,
     frog_pivot: Point,
     params: TargetScoringParams,
 ) -> TargetCandidate:
+    cluster = clusters[cluster_idx]
     center_x = sum(entity.x for entity in cluster.entities) / cluster.size
     center_y = sum(entity.y for entity in cluster.entities) / cluster.size
     center_entity = cluster.entities[len(cluster.entities) // 2]
     track_idx = _clamp_track_idx(center_entity.track_idx, track)
 
-    target_type = ELIM_TARGET if cluster.size >= 2 else PAIR_TARGET
-    base_score = params.elim_priority if target_type == ELIM_TARGET else params.pair_priority
+    target_type, base_score, combo_depth = _classify_target(
+        clusters=clusters,
+        cluster_idx=cluster_idx,
+        target_color=target_color,
+        params=params,
+    )
     distance = math.hypot(center_x - frog_pivot.x, center_y - frog_pivot.y)
     orthogonality = _shot_track_orthogonality(
         target=Point(x=center_x, y=center_y),
@@ -102,10 +124,12 @@ def _score_cluster(
     )
     straightness = _track_straightness(track, track_idx)
     normalized_distance = max(0.0, min(1.0, 1.0 - distance / params.distance_normalizer))
+    depth_bonus = min(params.max_combo_depth_bonus, combo_depth * params.combo_depth_bonus)
     final_score = base_score * (
         1.0
         + params.distance_weight * normalized_distance
         + params.orthogonality_weight * orthogonality
+        + depth_bonus
     )
 
     is_bad_geometry = (
@@ -121,13 +145,131 @@ def _score_cluster(
         target_type=target_type,
         reason=(
             f"cluster track={cluster.track_id} color={cluster.color} size={cluster.size} "
-            f"orthogonality={orthogonality:.3f} straightness={straightness:.3f}"
+            f"orthogonality={orthogonality:.3f} straightness={straightness:.3f} "
+            f"combo_depth={combo_depth}"
         ),
+        combo_depth=combo_depth,
         track_id=cluster.track_id,
         track_idx=center_entity.track_idx,
         cluster_start_idx=cluster.start_idx,
         cluster_end_idx=cluster.end_idx,
     )
+
+
+def _classify_target(
+    clusters: tuple[Cluster, ...],
+    cluster_idx: int,
+    target_color: str,
+    params: TargetScoringParams,
+) -> tuple[str, float, int]:
+    cluster = clusters[cluster_idx]
+    if cluster.size < 2:
+        return PAIR_TARGET, params.pair_priority, 0
+
+    combo_depth = _potential_combo_depth(clusters, cluster_idx) - 1
+    max_other_depth = _max_nearby_other_combo_depth(clusters, cluster_idx)
+    if max_other_depth > combo_depth + 1:
+        return PAIR_TARGET, params.pair_priority, 0
+    if combo_depth >= 1:
+        return COMBO_TARGET, params.combo_priority, combo_depth
+    if _is_rollback_elimination(clusters, cluster_idx, target_color):
+        return ROLLBACK_ELIM_TARGET, params.rollback_elim_priority, 0
+    return ELIM_TARGET, params.elim_priority, 0
+
+
+def _potential_combo_depth(clusters: tuple[Cluster, ...], cluster_idx: int) -> int:
+    depth = 1
+    left_idx = cluster_idx - 1
+    right_idx = cluster_idx + 1
+    while True:
+        left_idx = _previous_known_cluster_idx(clusters, left_idx)
+        right_idx = _next_known_cluster_idx(clusters, right_idx)
+        if left_idx is None or right_idx is None:
+            break
+
+        left = clusters[left_idx]
+        right = clusters[right_idx]
+        target = clusters[cluster_idx]
+        if (
+            left.track_id == right.track_id == target.track_id
+            and left.color == right.color
+            and left.size + right.size >= 3
+        ):
+            depth += 1
+            left_idx -= 1
+            right_idx += 1
+            continue
+        break
+    return depth
+
+
+def _max_nearby_other_combo_depth(clusters: tuple[Cluster, ...], cluster_idx: int) -> int:
+    max_depth = 0
+    for other_idx, other_cluster in enumerate(clusters):
+        if other_idx == cluster_idx:
+            continue
+        if other_cluster.color == UNKNOWN_COLOR:
+            continue
+        if abs(other_idx - cluster_idx) <= 4 and other_cluster.size >= 2:
+            max_depth = max(max_depth, _potential_combo_depth(clusters, other_idx))
+    return max_depth
+
+
+def _is_rollback_elimination(
+    clusters: tuple[Cluster, ...],
+    cluster_idx: int,
+    target_color: str,
+) -> bool:
+    left_idx = _previous_known_cluster_idx(clusters, cluster_idx - 1)
+    right_idx = _next_known_cluster_idx(clusters, cluster_idx + 1)
+    if left_idx is None or right_idx is None:
+        return False
+
+    cluster = clusters[cluster_idx]
+    left = clusters[left_idx]
+    right = clusters[right_idx]
+    return (
+        left.track_id == right.track_id == cluster.track_id
+        and left.color == right.color
+        and left.color != target_color
+    )
+
+
+def _is_adjacent_to_same_color_cluster(
+    clusters: tuple[Cluster, ...],
+    cluster_idx: int,
+    target_color: str,
+) -> bool:
+    left_idx = _previous_known_cluster_idx(clusters, cluster_idx - 1)
+    if left_idx is not None:
+        left = clusters[left_idx]
+        if left.track_id == clusters[cluster_idx].track_id and left.color == target_color:
+            return True
+
+    right_idx = _next_known_cluster_idx(clusters, cluster_idx + 1)
+    if right_idx is not None:
+        right = clusters[right_idx]
+        if right.track_id == clusters[cluster_idx].track_id and right.color == target_color:
+            return True
+    return False
+
+
+def _previous_known_cluster_idx(clusters: tuple[Cluster, ...], start_idx: int) -> int | None:
+    idx = start_idx
+    while idx >= 0 and clusters[idx].color == UNKNOWN_COLOR:
+        idx -= 1
+    if idx < 0:
+        return None
+    return idx
+
+
+def _next_known_cluster_idx(clusters: tuple[Cluster, ...], start_idx: int) -> int | None:
+    idx = start_idx
+    while idx < len(clusters) and clusters[idx].color == UNKNOWN_COLOR:
+        idx += 1
+    if idx >= len(clusters):
+        return None
+    return idx
 
 
 def _shot_track_orthogonality(

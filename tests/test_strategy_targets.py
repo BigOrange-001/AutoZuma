@@ -12,8 +12,10 @@ from autozuma.core.models import (
     WorldState,
 )
 from autozuma.strategy.targets import (
+    COMBO_TARGET,
     ELIM_TARGET,
     PAIR_TARGET,
+    ROLLBACK_ELIM_TARGET,
     TargetScoringParams,
     score_basic_targets,
     score_basic_targets_for_color,
@@ -78,8 +80,12 @@ def test_score_basic_targets_scores_single_ball_as_pair_target():
 
 def test_score_basic_targets_sorts_candidates_by_score_descending():
     pair_cluster = _cluster("red", 1, 30)
+    spacer_cluster = _cluster("blue", 1, 60)
     elim_cluster = _cluster("red", 2, 90)
-    world_state = _world_state(current_ball="red", clusters=(pair_cluster, elim_cluster))
+    world_state = _world_state(
+        current_ball="red",
+        clusters=(pair_cluster, spacer_cluster, elim_cluster),
+    )
 
     targets = score_basic_targets(world_state, _level(), _params())
 
@@ -87,8 +93,87 @@ def test_score_basic_targets_sorts_candidates_by_score_descending():
     assert targets[0].score > targets[1].score
 
 
+def test_score_basic_targets_skips_adjacent_same_color_clusters():
+    left_cluster = _cluster("red", 1, 30)
+    right_cluster = _cluster("red", 2, 90)
+    world_state = _world_state(current_ball="red", clusters=(left_cluster, right_cluster))
+
+    assert score_basic_targets(world_state, _level(), _params()) == ()
+
+
+def test_score_basic_targets_scores_combo_when_neighbors_collapse():
+    left_cluster = _cluster("blue", 2, 20)
+    target_cluster = _cluster("red", 2, 50)
+    right_cluster = _cluster("blue", 1, 80)
+    world_state = _world_state(
+        current_ball="red",
+        clusters=(left_cluster, target_cluster, right_cluster),
+    )
+
+    targets = score_basic_targets(world_state, _level(), _params())
+
+    assert len(targets) == 1
+    assert targets[0].target_type == COMBO_TARGET
+    assert targets[0].combo_depth == 1
+    assert "combo_depth=1" in targets[0].reason
+
+
+def test_score_basic_targets_scores_rollback_elimination():
+    left_cluster = _cluster("blue", 1, 20)
+    target_cluster = _cluster("red", 2, 50)
+    right_cluster = _cluster("blue", 1, 80)
+    world_state = _world_state(
+        current_ball="red",
+        clusters=(left_cluster, target_cluster, right_cluster),
+    )
+
+    targets = score_basic_targets(world_state, _level(), _params())
+
+    assert len(targets) == 1
+    assert targets[0].target_type == ROLLBACK_ELIM_TARGET
+    assert targets[0].combo_depth == 0
+
+
+def test_score_basic_targets_downgrades_when_nearby_combo_is_deeper():
+    target_cluster = _cluster("red", 2, 10)
+    combo_left = _cluster("yellow", 2, 35)
+    combo_center = _cluster("blue", 2, 60)
+    combo_right = _cluster("yellow", 1, 85)
+    world_state = _world_state(
+        current_ball="red",
+        clusters=(target_cluster, combo_left, combo_center, combo_right),
+    )
+
+    targets = score_basic_targets(world_state, _level(), _params())
+
+    assert len(targets) == 1
+    assert targets[0].target_type == PAIR_TARGET
+    assert targets[0].score < 100.0
+
+
+def test_score_basic_targets_skips_unknown_clusters_when_scanning_neighbors():
+    left_cluster = _cluster("blue", 2, 20)
+    unknown_cluster = _cluster("unknown", 1, 40)
+    target_cluster = _cluster("red", 2, 60)
+    right_cluster = _cluster("blue", 1, 90)
+    world_state = _world_state(
+        current_ball="red",
+        clusters=(left_cluster, unknown_cluster, target_cluster, right_cluster),
+    )
+
+    targets = score_basic_targets(world_state, _level(), _params())
+
+    assert len(targets) == 1
+    assert targets[0].target_type == COMBO_TARGET
+
+
 def _params() -> TargetScoringParams:
-    return TargetScoringParams(elim_priority=10.0, pair_priority=1.0)
+    return TargetScoringParams(
+        combo_priority=100.0,
+        rollback_elim_priority=30.0,
+        elim_priority=10.0,
+        pair_priority=1.0,
+    )
 
 
 def _world_state(current_ball: str, clusters: tuple[Cluster, ...]) -> WorldState:

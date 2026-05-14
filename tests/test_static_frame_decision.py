@@ -18,6 +18,7 @@ from autozuma.core.models import (
     WorldState,
 )
 from autozuma.decision.static_frame import StaticFrameDecisionParams, decide_static_frame_command
+from autozuma.strategy.discard import DiscardParams
 from autozuma.strategy.prediction import TargetPredictionParams
 from autozuma.strategy.selection import TargetSelectionParams
 from autozuma.strategy.swap import SwapDecisionParams
@@ -97,11 +98,50 @@ def test_decide_static_frame_command_returns_screen_no_op_without_target(monkeyp
         frame_bgr=raw_frame,
         level=level,
         launcher_templates=template_set,
+        params=StaticFrameDecisionParams(fallback_discard=DiscardParams(enabled=False)),
     )
 
     assert command.command_type == CommandType.NO_OP
     assert command.primary_target is None
     assert command.secondary_target is None
+
+
+def test_decide_static_frame_command_discards_when_no_target_is_selected(monkeypatch):
+    raw_frame = np.zeros((30, 30, 3), dtype=np.uint8)
+    roi_frame = np.full((20, 20, 3), 9, dtype=np.uint8)
+    level = _level()
+    template_set = LauncherTemplateSet(search_radius=5, step_degrees=5, templates={})
+    roi_result = GameRoiResult(frame=roi_frame, offset=Point(x=10, y=20), confidence=1.0)
+
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.extract_game_roi",
+        lambda frame_bgr, level: roi_result,
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.detect_static_world_state_from_roi",
+        lambda **kwargs: _world_state(current_color="red"),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.score_basic_targets",
+        lambda **kwargs: (),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.score_basic_targets_for_color",
+        lambda **kwargs: (),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.discard_target",
+        lambda **kwargs: _target_candidate(x=3.0, y=4.0, score=0.0, track_idx=3),
+    )
+
+    command = decide_static_frame_command(
+        frame_bgr=raw_frame,
+        level=level,
+        launcher_templates=template_set,
+    )
+
+    assert command.command_type == CommandType.SHOOT
+    assert command.primary_target == Point(x=13.0, y=24.0)
 
 
 def test_decide_static_frame_command_returns_swap_shoot_for_better_next_target(monkeypatch):

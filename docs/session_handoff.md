@@ -23,7 +23,7 @@ The current refactor has completed the foundation layers:
 - Stateless ball entity detection for static-background levels.
 - Topological cluster building from detected ball entities.
 - Static world-state perception assembly.
-- Basic strategy target scoring.
+- Strategy target scoring with basic, combo, and rollback target classes.
 - Strategy line-of-sight filtering.
 - Strategy target selection.
 - Basic strategy command generation.
@@ -31,8 +31,9 @@ The current refactor has completed the foundation layers:
 - Pure static-frame decision pipeline for static-background levels.
 - Pure target-coordinate prediction along dense track geometry.
 - Pure swap decision based on current-ball versus next-ball target scores.
+- Pure fallback discard target selection.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, swap cooldown/execution, fallback discard, runtime cooldowns, or command execution has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, swap cooldown/execution, runtime cooldowns, or command execution has been done yet.
 
 ## Important Paths
 
@@ -65,7 +66,7 @@ Current model groups:
 - Launcher template models: `LauncherTemplate`, `LauncherTemplateSet`
 - Future gameplay skeletons: `BallEntity`, `Cluster`, `LauncherState`, `WorldState`, `TargetCandidate`, `Command`
 
-`TargetCandidate` now includes optional topology context fields for track id, target track index, and cluster start/end indices.
+`TargetCandidate` now includes optional combo depth and topology context fields for track id, target track index, and cluster start/end indices.
 
 ### Asset Loading And Validation
 
@@ -193,17 +194,18 @@ Behavior:
 - Returns `WorldState(level_id, launcher, entities, clusters)`.
 - Currently supports only static-background levels; `space` remains a special detection gap.
 
-### Basic Strategy Target Scoring
+### Strategy Target Scoring
 
 File: `src/autozuma/strategy/targets.py`
 
 Behavior:
 
 - Scores `WorldState` clusters that match the current launcher ball color.
-- Produces `TargetCandidate` values for basic `ELIM` and `PAIR` targets.
+- Produces `TargetCandidate` values for `COMBO`, `ROLLBACK_ELIM`, `ELIM`, and `PAIR` targets.
 - Keeps scoring pure and stateless with explicit `TargetScoringParams`.
 - Uses distance, shot/track orthogonality, local straightness, and bad-geometry penalty terms from the prototype baseline.
-- Does not yet handle combo depth, rollback, coins, line-of-sight, locks, or command generation.
+- Preserves prototype combo-depth scanning, rollback classification, same-color adjacent-cluster skipping, and nearby deeper-combo downgrade behavior.
+- Does not yet handle coins, line-of-sight, locks, or command generation.
 
 ### Strategy Line-Of-Sight
 
@@ -226,7 +228,7 @@ Behavior:
 - Uses `check_line_of_sight()` to skip blocked candidates.
 - Passes target topology metadata into line-of-sight filtering.
 - Returns the best clear candidate or `None`.
-- Does not yet handle cooldown, swaps, fallback discard, or command generation.
+- Does not yet handle cooldown, swaps, or command generation.
 
 ### Strategy Prediction
 
@@ -254,6 +256,19 @@ Behavior:
 - Returns a pure `SwapDecision` with `should_swap`, selected candidates, best scores, and a reason.
 - Does not handle swap cooldown, right-click execution, runtime state, or UI handling.
 
+### Fallback Discard
+
+File: `src/autozuma/strategy/discard.py`
+
+Behavior:
+
+- Produces a pure `DISCARD` target when no selected clear target exists and the current launcher ball is known.
+- Preserves prototype fallback order: nearest clear edge point, reachable gap, size-1 cluster, earliest known cluster, then upward shot.
+- Uses line-of-sight for edge and reachable-gap fallback candidates.
+- Prefers reachable gaps near same-color clusters.
+- Emits normal `SHOOT` through the static-frame decision pipeline.
+- Does not handle fire cooldown, mouse execution, action tracker, virtual balls, or locks.
+
 ### Basic Strategy Command Generation
 
 File: `src/autozuma/strategy/commands.py`
@@ -263,7 +278,7 @@ Behavior:
 - Converts a selected `TargetCandidate` into a `CommandType.SHOOT` command at the ROI-local target point.
 - Converts a selected swapped target into `CommandType.SWAP_SHOOT`.
 - Converts missing target selection into `CommandType.NO_OP`.
-- Does not yet handle ROI-to-screen offsets, double shots, cooldowns, locks, fallback discard, or mouse execution.
+- Does not yet handle ROI-to-screen offsets, double shots, cooldowns, locks, or mouse execution.
 
 ### ROI-To-Screen Command Mapping
 
@@ -288,8 +303,9 @@ Behavior:
 - Scores both current-ball and next-ball targets and applies pure swap decision before prediction.
 - Applies pure target prediction between scoring and line-of-sight selection.
 - Returns a screen-frame `Command`.
-- Returns `CommandType.NO_OP` when no target is selected.
-- Remains pure and single-frame: no live capture, mouse execution, cooldowns, locks, swaps, fallback discard, or UI handling.
+- Returns fallback `CommandType.SHOOT` when no target is selected but discard is available.
+- Returns `CommandType.NO_OP` when no target is selected and discard is disabled or unavailable.
+- Remains pure and single-frame: no live capture, mouse execution, cooldowns, locks, or UI handling.
 
 ## Migrated Assets
 
@@ -316,7 +332,7 @@ Run from `AutoZumaNext/`:
 
 Last known results:
 
-- `pytest`: 85 passed
+- `pytest`: 98 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
@@ -327,10 +343,10 @@ The next clean step is to migrate another pure strategy decision slice.
 Suggested scope:
 
 - Keep it pure and single-frame.
-- Add one behavior slice at a time, with tests: combo/rollback scoring or fallback discard are reasonable candidates.
+- Add one behavior slice at a time, with tests: command variants or coin targets are reasonable candidates.
 - Do not add live capture, mouse execution, GUI, runtime cooldowns, or UI handling in the same step unless there is a specific reason.
 
-Combo/rollback scoring is likely the cleanest next step because it extends target scoring without introducing runtime execution concerns.
+Command variants are likely the cleanest next step because `DOUBLE_SHOOT` and `SWAP_DOUBLE_SHOOT` can be represented in existing `Command` fields before adding runtime mouse execution.
 
 ## Design Rules To Preserve
 

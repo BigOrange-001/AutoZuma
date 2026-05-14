@@ -9,6 +9,7 @@ import numpy as np
 from autozuma.control.commands import map_command_to_screen
 from autozuma.core.models import Command, LevelRuntimeAssets, LauncherTemplateSet
 from autozuma.strategy.commands import command_for_selected_target
+from autozuma.strategy.discard import DiscardParams, discard_target
 from autozuma.strategy.prediction import TargetPredictionParams, predict_targets
 from autozuma.strategy.selection import TargetSelectionParams, select_best_clear_target
 from autozuma.strategy.swap import SwapDecisionParams, choose_swap_candidates
@@ -29,6 +30,7 @@ class StaticFrameDecisionParams:
     target_swap: SwapDecisionParams = SwapDecisionParams()
     target_prediction: TargetPredictionParams = TargetPredictionParams()
     target_selection: TargetSelectionParams = TargetSelectionParams()
+    fallback_discard: DiscardParams = DiscardParams()
     p_start_exclude: float = 0.0
     p_end_exclude: float = 0.0
 
@@ -78,5 +80,17 @@ def decide_static_frame_command(
         frog_pivot=level.topology.frog_pivot,
         params=params.target_selection,
     )
-    roi_command = command_for_selected_target(selected_target, swap=swap_decision.should_swap)
+    should_discard = selected_target is None and bool(swap_decision.candidates)
+    if selected_target is None and (should_discard or not swap_decision.candidates):
+        selected_target = discard_target(
+            world_state=world_state,
+            level=level,
+            roi_size=(roi_result.frame.shape[1], roi_result.frame.shape[0]),
+            params=params.fallback_discard,
+        )
+        swap = False
+    else:
+        swap = swap_decision.should_swap
+
+    roi_command = command_for_selected_target(selected_target, swap=swap)
     return map_command_to_screen(roi_command, roi_result)

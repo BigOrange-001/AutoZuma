@@ -170,6 +170,7 @@ class TargetCandidate:
     score: float
     target_type: str
     reason: str = ""
+    combo_depth: int = 0
     track_id: int | None = None
     track_idx: int | None = None
     cluster_start_idx: int | None = None

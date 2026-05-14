@@ -509,3 +509,61 @@ Validation:
 - `.venv\Scripts\python -m pytest` passed: 85 tests.
 - `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Strategy Combo And Rollback Scoring Baseline
+
+Migrated the pure combo/rollback target-classification portion of prototype greedy scoring.
+
+Added:
+
+- `COMBO` and `ROLLBACK_ELIM` target types in `src/autozuma/strategy/targets.py`.
+- Combo and rollback priorities on `TargetScoringParams`.
+- `combo_depth` metadata on `TargetCandidate`.
+- Combo/rollback scoring tests in `tests/test_strategy_targets.py`.
+
+Behavior:
+
+- Scores same-color clusters as `COMBO` when removing the target cluster would connect same-track, same-color neighbor clusters with combined size at least 3.
+- Preserves the prototype combo-depth scan, including skipping `unknown` clusters while looking left and right.
+- Adds the prototype depth bonus term, capped at `2.0`.
+- Scores `ROLLBACK_ELIM` when the immediate non-unknown neighbors on both sides are same-track, same-color, and not the fired color.
+- Preserves the prototype behavior that skips targets adjacent to another same-color cluster on the same track.
+- Preserves the prototype downgrade behavior where an elimination target near a deeper combo is scored with pair priority.
+- Keeps scoring pure and stateless: no action tracker, virtual balls, locks, cooldowns, or execution behavior.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 90 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Fallback Discard Baseline
+
+Migrated the pure fallback discard target-selection portion of the prototype decision loop.
+
+Added:
+
+- `src/autozuma/strategy/discard.py`.
+- `DiscardParams` on `StaticFrameDecisionParams`.
+- Fallback discard tests in `tests/test_strategy_discard.py`.
+- Static-frame fallback coverage in `tests/test_static_frame_decision.py`.
+
+Behavior:
+
+- Runs fallback only when no selected clear target exists and the current launcher ball is known.
+- Preserves the prototype fallback order:
+  - nearest clear edge point;
+  - reachable gap between nearby different-color clusters;
+  - size-1 cluster;
+  - earliest known cluster;
+  - upward shot from the frog pivot.
+- Uses line-of-sight checks for edge and reachable-gap candidates.
+- Prefers reachable gaps near same-color clusters when possible.
+- Emits a normal `SHOOT` command for fallback, not a swap command.
+- Keeps fallback pure and stateless: no fire cooldown, mouse execution, action tracker, virtual balls, or locks.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 98 tests.
+- `.venv\Scripts\python -m ruff check AutoZumaNext` passed from the parent workspace.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
