@@ -2,6 +2,87 @@
 
 ## 2026-05-14
 
+### Live Loop And Hotkey Control Baseline
+
+Migrated the first long-running loop scaffold and F-key control boundary around
+the one-frame static live adapter.
+
+Added:
+
+- `src/autozuma/control/hotkeys.py`.
+- `src/autozuma/runtime/loop.py`.
+- Hotkey tests in `tests/test_control_hotkeys.py`.
+- Live loop tests in `tests/test_runtime_loop.py`.
+
+Behavior:
+
+- Polls F1/F2/F3 through an explicit `HotkeyReader` protocol.
+- Preserves prototype edge-triggered hotkey behavior:
+  - F1 toggles armed/safe.
+  - F1 arming requests a fresh static session reset.
+  - F2 emits a debug-request event without owning debug output.
+  - F3 forces safe.
+- Provides `Win32HotkeyReader` backed by `GetAsyncKeyState`.
+- Adds `LiveLoopState` for static session state plus hotkey state.
+- Adds one-iteration and bounded-loop runners with injectable clock and hotkey
+  reader for deterministic tests.
+- Calls `run_live_static_session_frame()` only while armed.
+- Resets `StaticSessionState` when F1 arms, matching the prototype reset flag
+  sent from I/O to compute.
+- Preserves prototype default target FPS of `10.0`.
+- Keeps debug snapshot rendering, GUI controls, UI-state detection,
+  dynamic-background `space` handling, and multi-process/shared-memory
+  orchestration outside this slice.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_control_hotkeys.py tests\test_runtime_loop.py tests\test_runtime_live.py tests\test_runtime_session.py` passed: 18 tests.
+- `.venv\Scripts\python -m pytest` passed: 202 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
+### Static Capture And Session Shell Baseline
+
+Migrated the first live-facing shell around static-background runtime execution.
+
+Added:
+
+- `src/autozuma/control/capture.py`.
+- `src/autozuma/runtime/session.py`.
+- `src/autozuma/runtime/live.py`.
+- Capture tests in `tests/test_control_capture.py`.
+- Static session tests in `tests/test_runtime_session.py`.
+- Live adapter tests in `tests/test_runtime_live.py`.
+
+Behavior:
+
+- Captures a client-window rectangle through an `mss`-compatible grabber and
+  returns a BGR frame.
+- Adds explicit `StaticSessionState` with `DETECTING` and `PLAYING` phases.
+- Preserves prototype initial detection behavior: detecting a level initializes
+  static runtime state and switches to playing, but does not shoot on that same
+  frame.
+- Preserves prototype periodic map redetection default of `4.0s`.
+- Resets `StaticRuntimeState` when redetection finds a different static level.
+- Continues processing the current frame after a playing-state map switch,
+  matching the prototype's map-change branch.
+- Adds `run_live_static_session_frame()` to find the game window, capture one
+  frame, build a `Win32CommandExecutor`, and call the static session adapter.
+- Adds `build_live_static_session_context()` for loading the asset registry and
+  launcher template set once per live session.
+- Keeps hotkey handling, arm/safe state, GUI controls, UI-state detection,
+  dynamic-background `space` handling, debug evidence output, and long-running
+  process orchestration outside this slice.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_live.py tests\test_runtime_session.py tests\test_control_capture.py` passed: 10 tests.
+- `.venv\Scripts\python -m pytest` passed: 192 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
 ### Static Runtime Host Adapter Baseline
 
 Added the first host-facing adapter that wires the pure static runtime output into

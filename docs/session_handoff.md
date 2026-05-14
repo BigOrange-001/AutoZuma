@@ -46,8 +46,10 @@ The current refactor has completed the foundation layers:
 - Pure command execution plan generation for shoot, double-shoot, swap-shoot, swap-double-shoot, and UI click commands.
 - Minimal Win32 command executor behind an explicit side-effect boundary.
 - Host-facing static runtime adapter that converts pure single-frame runtime commands into execution plans and optionally dispatches them through a driver.
+- Static session shell for detecting static levels, initializing/resetting runtime state, periodic map redetection, and live one-frame capture/dispatch.
+- Long-running live loop scaffold with injectable clock/hotkey reader and F1/F2/F3 edge-triggered control.
 
-No live game automation loop, GUI, frame capture, UI state handling, hotkey handling, map-switching state machine, or INI/GUI parameter loading has been done yet. The Win32 command executor and static host adapter exist, but they are not wired into a capture loop.
+No GUI, UI state handling, INI/GUI parameter loading, dynamic-background `space` handling, debug evidence output, or multi-process/shared-memory orchestration has been done yet. A static live loop scaffold now exists, but it has not been packaged into a user-facing CLI/app entry point.
 
 ## Important Paths
 
@@ -422,6 +424,17 @@ Behavior:
 - Preserves prototype virtual right-click behavior at the client-window center.
 - Remains an explicit side-effect adapter; it is not yet wired into live capture, hotkeys, UI-state detection, or the static runtime orchestrator.
 
+### Window Capture
+
+File: `src/autozuma/control/capture.py`
+
+Behavior:
+
+- Captures a `WindowRect` through an `mss`-compatible grabber.
+- Converts captured BGRA/BGR-like data into a copied BGR frame using the first three channels.
+- Allows tests and future replay/capture adapters to inject a fake grabber.
+- Does not discover windows, normalize frame sizes, own hotkeys, or loop.
+
 ### Static Frame Decision Pipeline
 
 File: `src/autozuma/decision/static_frame.py`
@@ -521,6 +534,62 @@ Behavior:
 - Returns `StaticHostFrameResult` with both detailed runtime output and the execution plan.
 - Keeps capture, window discovery, hotkeys, map detection/switching, UI-state handling, GUI controls, INI loading, and dynamic-background `space` handling outside this slice.
 
+### Static Session Shell
+
+File: `src/autozuma/runtime/session.py`
+
+Behavior:
+
+- Represents static session phase as `DETECTING` or `PLAYING`.
+- Detecting state runs static level recognition and initializes `StaticRuntimeState` for the detected level.
+- Preserves prototype behavior that the first detected frame switches to playing but does not emit a shot.
+- Playing state calls `run_static_host_frame()` with the current static level and runtime state.
+- Periodically redetects the static map; default interval is the prototype `4.0s`.
+- When redetection finds a different static level, resets runtime state and continues processing the current frame with the new level.
+- Keeps hotkeys, UI-state handling, dynamic-background `space`, GUI controls, and long-running loop ownership outside this slice.
+
+### Live Static One-Frame Adapter
+
+File: `src/autozuma/runtime/live.py`
+
+Behavior:
+
+- Provides `build_live_static_session_context()` to load the asset registry and launcher templates once.
+- Provides `run_live_static_session_frame()` to find the game window, capture one frame, create a `Win32CommandExecutor`, and run the static session shell.
+- Supports physical or virtual mouse execution through `LiveStaticSessionParams.use_virtual_mouse`.
+- Still owns only one frame at a time; no arm/safe hotkeys, sleep loop, FPS pacing, GUI, or process orchestration yet.
+
+### Hotkey Control
+
+File: `src/autozuma/control/hotkeys.py`
+
+Behavior:
+
+- Polls F1/F2/F3 through an explicit `HotkeyReader` protocol.
+- Provides `Win32HotkeyReader` backed by Win32 `GetAsyncKeyState`.
+- Preserves edge-triggered prototype controls:
+  - F1 toggles armed/safe.
+  - F1 arming requests a fresh static session reset.
+  - F2 emits a debug-request event.
+  - F3 forces safe.
+- Does not save debug screenshots, print UI messages, or own the live loop.
+
+### Live Loop Scaffold
+
+File: `src/autozuma/runtime/loop.py`
+
+Behavior:
+
+- Provides `LiveLoopState` for static session state plus hotkey polling state.
+- Provides `run_live_loop_iteration()` for deterministic one-step loop testing.
+- Provides `run_live_loop()` for bounded or long-running operation.
+- Uses injectable `LoopClock` and `HotkeyReader`; defaults to system time/sleep and Win32 hotkeys.
+- Calls `run_live_static_session_frame()` only while armed.
+- Resets `StaticSessionState` when F1 arms, matching the prototype I/O-to-compute reset flag.
+- Preserves prototype default target FPS of `10.0`.
+- Supports dry-run command behavior through existing nested `execute_commands=False` host params.
+- Does not yet own debug snapshot rendering, GUI controls, process orchestration, or UI-state handling.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -546,9 +615,17 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 182 passed
+- `pytest`: 202 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
+
+Last targeted live-loop check:
+
+- `.venv\Scripts\python -m pytest tests\test_control_hotkeys.py tests\test_runtime_loop.py tests\test_runtime_live.py tests\test_runtime_session.py`: 18 passed
+
+Last targeted static session/capture check:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_live.py tests\test_runtime_session.py tests\test_control_capture.py`: 10 passed
 
 Last targeted command-execution check:
 
@@ -565,15 +642,13 @@ Last targeted static-runtime check:
 
 ## Next Recommended Step
 
-The next clean step is to migrate the live capture/session shell around the static host adapter.
+The next clean step is to add a small CLI/app entry point for the static live loop.
 
 Suggested scope:
 
-- Add a capture/session adapter that discovers the game window, captures one frame, and calls `run_static_host_frame()`.
-- Keep arm/safe hotkeys as a separate input controller rather than burying them in strategy or execution.
-- Add a static-level session state machine for detecting a level, initializing `StaticRuntimeState`, and resetting it on map changes.
-- Preserve the existing pure pipeline and `run_static_host_frame()` as the source of truth for command planning and dispatch.
-- Keep GUI panel, UI-state detection, dynamic-background `space` handling, and full process orchestration outside this immediate slice unless the next session intentionally chooses one of those instead.
+- Add a CLI command that loads `LiveStaticSessionContext`, builds params from defaults/raw config, and runs `run_live_loop()`.
+- Include a dry-run flag that forces `execute_commands=False` for initial live verification.
+- Keep GUI panel, UI-state detection, dynamic-background `space` handling, debug evidence output, and multi-process/shared-memory orchestration outside this immediate slice unless the next session intentionally chooses one of those instead.
 
 ## Design Rules To Preserve
 
