@@ -40,6 +40,7 @@ The current refactor has completed the foundation layers:
 - Pure virtual-ball cluster-size injection.
 - Pure command-result action updates and cooldown planning.
 - Rich static-frame decision results and pure stateful static-frame fire/swap gating.
+- Pure runtime rescue/endgame mode detection and mode-scoped parameter resolution.
 
 No live game automation, mouse execution, GUI, frame capture, UI state handling, swap execution, or command execution has been done yet.
 
@@ -410,6 +411,35 @@ Behavior:
 - Stateful static-frame decision injects action state into target scoring, applies active virtual balls to clusters, gates swap with the prototype `0.5s` cooldown, gates fire readiness with `next_fire_ready_time`, and calls command-outcome updates only for emitted shoot commands.
 - Remains pure and single-frame: no live capture, mouse execution, sleeping, swap execution, or UI handling.
 
+### Runtime Mode Detection
+
+File: `src/autozuma/runtime/modes.py`
+
+Behavior:
+
+- Represents runtime mode as explicit immutable `RuntimeModeState`.
+- Provides `initial_runtime_mode_state(current_time)` for prototype-equivalent level reset state.
+- Computes rescue mode from entity distance to dense-track end using `TrackGeometry.cumulative_distances`.
+- Preserves prototype strict rescue check: `total_length - dist_along_path < rescue_distance_threshold`.
+- Computes spawn presence from strict start-distance check: `dist_along_path < endgame_spawn_distance_threshold`.
+- Preserves prototype timing windows: sustained spawn for more than `2.0s` clears endgame; missing spawn for more than `3.0s` enters endgame.
+- `RuntimeModeState.mode` prioritizes rescue over endgame over normal.
+- Keeps live capture, level switching, UI state, and parameter mutation outside this slice.
+
+### Runtime Parameter Resolution
+
+File: `src/autozuma/runtime/params.py`
+
+Behavior:
+
+- Resolves prototype `N_*`, `R_*`, and `E_*` scoped values through `RuntimeParameterResolver`.
+- Accepts either `RuntimeMode` or `RuntimeModeState`.
+- Uses rescue parameters before endgame parameters when both flags are true, matching runtime mode priority.
+- Falls back to an unscoped key, then `0.0`, matching prototype `get_p()`.
+- Treats keys case-insensitively so lower-case INI names and upper-case GUI/shared-param names both work.
+- Preserves prototype rank-to-weight mapping: `int(rank)`, then `10 ** (6 - rank)`.
+- Does not load INI files, own GUI state, or mutate shared params.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -435,25 +465,24 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 150 passed
+- `pytest`: 165 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
-Last targeted stateful decision/action integration check:
+Last targeted runtime mode/param check:
 
-- `.venv\Scripts\python -m pytest tests\test_static_frame_decision.py tests\test_strategy_action_updates.py`: 18 passed
+- `.venv\Scripts\python -m pytest tests\test_runtime_modes.py tests\test_runtime_params.py`: 15 passed
 
 ## Next Recommended Step
 
-The next clean step is to migrate runtime mode detection and parameter resolution.
+The next clean step is to add a pure runtime strategy-parameter adapter.
 
 Suggested scope:
 
-- Given a perceived `WorldState`, `LevelRuntimeAssets`, previous mode state, and `current_time`, compute rescue/endgame/normal mode state.
-- Preserve prototype rescue detection from distance-to-track-end threshold.
-- Preserve prototype spawn/endgame timing windows: sustained spawn near start clears endgame, and lack of spawn for the timeout enables endgame.
-- Add pure parameter resolution for `N_*`, `R_*`, and `E_*` scoped strategy settings and priority-rank mapping.
-- Keep live capture, GUI controls, mouse execution, and UI handling outside this slice.
+- Given a raw parameter mapping plus `RuntimeModeState`, produce the concrete `StaticFrameDecisionParams`, `StatefulStaticFrameDecisionParams`, `RuntimeModeParams`, and coin/action timing params used by the existing pure pipeline.
+- Preserve prototype mappings for `FIRE_COOLDOWN`, `M_GAP`, `COMBO_HANG_BASE`, `COMBO_HANG_MULT`, `SOFT_LOCK_RADIUS`, `PREDICT_MULT`, `COIN_BREAK_DELAY`, `RESCUE_TH`, `ENDGAME_SPAWN_TH`, `TRACK_START_EXCLUDE`, and `TRACK_END_EXCLUDE`.
+- Preserve ranked priority mapping for coin/combo/rollback/elim/pair priorities.
+- Keep INI file IO, GUI controls, live capture, mouse execution, and UI handling outside this slice.
 
 ## Design Rules To Preserve
 

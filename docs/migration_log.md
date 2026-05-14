@@ -2,6 +2,49 @@
 
 ## 2026-05-14
 
+### Runtime Mode And Parameter Resolution Baseline
+
+Migrated the pure rescue/endgame mode state and prototype-style parameter
+resolution used by the live decision loop.
+
+Added:
+
+- `src/autozuma/runtime/`.
+- `src/autozuma/runtime/modes.py`.
+- `src/autozuma/runtime/params.py`.
+- Runtime mode tests in `tests/test_runtime_modes.py`.
+- Runtime parameter tests in `tests/test_runtime_params.py`.
+
+Behavior:
+
+- `initial_runtime_mode_state(current_time)` creates the prototype-equivalent reset
+  state for a newly detected level with `last_spawn_time=current_time`.
+- `update_runtime_mode_state()` computes rescue mode from detected entity distance
+  to track end using dense-track cumulative distances.
+- Preserves the prototype strict rescue threshold: rescue triggers only when
+  `total_length - dist_along_path < RESCUE_TH`.
+- Computes spawn presence from distance along path using the prototype strict
+  `dist_along_path < ENDGAME_SPAWN_TH` check.
+- Preserves spawn timing windows: first spawn starts `spawn_start_time`, sustained
+  spawn for more than `2.0s` clears endgame, missing spawn resets
+  `spawn_start_time`, and missing spawn for more than `3.0s` enters endgame.
+- Runtime mode priority is rescue first, then endgame, then normal.
+- `RuntimeParameterResolver` resolves prototype `N_*`, `R_*`, and `E_*` scoped
+  values with fallback to the unscoped key and then `0.0`.
+- Parameter lookup is case-insensitive for INI-style lower-case keys.
+- Ranked priorities preserve the prototype `int(rank)` then `10 ** (6 - rank)`
+  weight mapping.
+- Keeps this slice pure: no INI loading, GUI controls, live capture, mouse
+  execution, or UI handling.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_modes.py tests\test_runtime_params.py` passed: 15 tests.
+- `.venv\Scripts\python -m pytest` passed: 165 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
 ### Stateful Static Frame Decision Baseline
 
 Migrated the pure stateful static-frame planning boundary that connects frame
