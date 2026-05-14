@@ -43,8 +43,11 @@ The current refactor has completed the foundation layers:
 - Pure runtime rescue/endgame mode detection and mode-scoped parameter resolution.
 - Pure runtime strategy-parameter adapter from raw/shared params into pipeline params.
 - Pure static-runtime single-frame orchestrator for ROI, coins, mode, decisions, and runtime state.
+- Pure command execution plan generation for shoot, double-shoot, swap-shoot, swap-double-shoot, and UI click commands.
+- Minimal Win32 command executor behind an explicit side-effect boundary.
+- Host-facing static runtime adapter that converts pure single-frame runtime commands into execution plans and optionally dispatches them through a driver.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, swap execution, command execution, or INI/GUI parameter loading has been done yet.
+No live game automation loop, GUI, frame capture, UI state handling, hotkey handling, map-switching state machine, or INI/GUI parameter loading has been done yet. The Win32 command executor and static host adapter exist, but they are not wired into a capture loop.
 
 ## Important Paths
 
@@ -392,6 +395,33 @@ Behavior:
 - Leaves targetless commands targetless.
 - Does not execute mouse input or enforce runtime cooldowns.
 
+### Command Execution Planning
+
+File: `src/autozuma/control/execution.py`
+
+Behavior:
+
+- Converts screen-frame `Command` values into ordered `ExecutionPlan` steps.
+- Preserves prototype command ordering for `SHOOT`, `DOUBLE_SHOOT`, `UI_CLICK`, `SWAP_SHOOT`, and `SWAP_DOUBLE_SHOOT`.
+- Preserves prototype swap wait default: right-click swap, wait `150 ms`, then shoot.
+- Preserves command-specific double-shot delays between primary and secondary shots.
+- Rejects shoot/click commands with missing required target coordinates.
+- Exposes `execute_plan()` over an explicit `ExecutionDriver` protocol.
+- Keeps plan generation pure and testable; no Win32, sleeping, capture loop, GUI, or shared-memory command array ownership.
+
+### Win32 Command Executor
+
+File: `src/autozuma/control/win32_executor.py`
+
+Behavior:
+
+- Provides `Win32CommandExecutor` for executing planned steps through physical `SendInput` or virtual/background window messages.
+- Provides `find_game_window()` for locating a visible game window and returning its client screen rect.
+- Preserves prototype click timings for shoot and UI-click actions.
+- Preserves prototype physical shot clamping inside the game client rect.
+- Preserves prototype virtual right-click behavior at the client-window center.
+- Remains an explicit side-effect adapter; it is not yet wired into live capture, hotkeys, UI-state detection, or the static runtime orchestrator.
+
 ### Static Frame Decision Pipeline
 
 File: `src/autozuma/decision/static_frame.py`
@@ -477,6 +507,20 @@ Behavior:
 - Returns detailed `StaticRuntimeFrameResult` with final state, stateful decision result, coin update, mode update, and concrete strategy config.
 - Does not capture the screen, discover windows, sleep, execute mouse input, click UI, load INI files, or own GUI controls.
 
+### Static Runtime Host Adapter
+
+File: `src/autozuma/runtime/host.py`
+
+Behavior:
+
+- Accepts an already-captured raw BGR frame, static level assets, launcher templates, current `StaticRuntimeState`, current time, runtime params, and an `ExecutionDriver`.
+- Calls `run_static_runtime_frame()` for perception, strategy, runtime state updates, and the final screen-frame command.
+- Converts the screen-frame command into an `ExecutionPlan` with `build_command_execution_plan()`.
+- Dispatches the plan through `execute_plan()` when command execution is enabled.
+- Supports `execute_commands=False` for dry-run live-loop testing without mouse input.
+- Returns `StaticHostFrameResult` with both detailed runtime output and the execution plan.
+- Keeps capture, window discovery, hotkeys, map detection/switching, UI-state handling, GUI controls, INI loading, and dynamic-background `space` handling outside this slice.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -502,9 +546,18 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 172 passed
+- `pytest`: 182 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
+
+Last targeted command-execution check:
+
+- `.venv\Scripts\python -m pytest tests\test_control_execution.py tests\test_control_commands.py`: 11 passed
+- `.venv\Scripts\python -m ruff check .`: passed
+
+Last targeted static-host check:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_host.py tests\test_control_execution.py tests\test_runtime_static_runtime.py`: 13 passed
 
 Last targeted static-runtime check:
 
@@ -512,15 +565,15 @@ Last targeted static-runtime check:
 
 ## Next Recommended Step
 
-The next clean step is to migrate command execution planning and Win32 execution boundaries.
+The next clean step is to migrate the live capture/session shell around the static host adapter.
 
 Suggested scope:
 
-- Add a platform-facing control/execution module that converts pure `Command` values into an execution plan for shoot, double-shoot, swap-shoot, swap-double-shoot, and UI click.
-- Preserve prototype command timing semantics: right-click swap before swapped shots, inter-shot delay for double shots, and primary/secondary target ordering.
-- Keep pure plan generation separate from actual Win32 `SendInput` / virtual message execution.
-- Then migrate the minimal Win32 executor behind an explicit side-effect boundary.
-- Keep live capture, GUI panel, UI-state detection, and dynamic-background `space` handling outside this immediate slice unless the next session intentionally chooses one of those instead.
+- Add a capture/session adapter that discovers the game window, captures one frame, and calls `run_static_host_frame()`.
+- Keep arm/safe hotkeys as a separate input controller rather than burying them in strategy or execution.
+- Add a static-level session state machine for detecting a level, initializing `StaticRuntimeState`, and resetting it on map changes.
+- Preserve the existing pure pipeline and `run_static_host_frame()` as the source of truth for command planning and dispatch.
+- Keep GUI panel, UI-state detection, dynamic-background `space` handling, and full process orchestration outside this immediate slice unless the next session intentionally chooses one of those instead.
 
 ## Design Rules To Preserve
 

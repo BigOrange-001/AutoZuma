@@ -2,6 +2,83 @@
 
 ## 2026-05-14
 
+### Static Runtime Host Adapter Baseline
+
+Added the first host-facing adapter that wires the pure static runtime output into
+command execution planning and an explicit driver.
+
+Added:
+
+- `src/autozuma/runtime/host.py`.
+- Static host adapter tests in `tests/test_runtime_host.py`.
+
+Behavior:
+
+- Accepts one already-captured raw BGR frame, static level assets, launcher
+  templates, current `StaticRuntimeState`, current time, concrete runtime
+  parameters, and an `ExecutionDriver`.
+- Calls `run_static_runtime_frame()` as the source of truth for perception,
+  strategy, cooldowns, locks, coin tracking, mode state, and the next runtime
+  state.
+- Converts the resulting screen-frame command into an `ExecutionPlan` through
+  `build_command_execution_plan()`.
+- Executes the plan through `execute_plan()` when command execution is enabled.
+- Supports `execute_commands=False` so future live loops can dry-run execution
+  plans without clicking the game.
+- Returns both the detailed pure runtime result and the generated execution plan.
+- Keeps screen capture, game-window lookup, hotkeys, UI state handling, map
+  detection/switching, GUI controls, INI loading, and dynamic-background `space`
+  handling outside this slice.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_host.py tests\test_control_execution.py tests\test_runtime_static_runtime.py` passed: 13 tests.
+- `.venv\Scripts\python -m pytest` passed: 182 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
+### Command Execution Planning And Win32 Boundary Baseline
+
+Migrated the command execution planning slice from the prototype I/O process and
+added an explicit Win32 side-effect boundary.
+
+Added:
+
+- `src/autozuma/control/execution.py`.
+- `src/autozuma/control/win32_executor.py`.
+- Command execution plan tests in `tests/test_control_execution.py`.
+
+Behavior:
+
+- Converts pure screen-frame `Command` values into ordered execution steps.
+- Preserves prototype command ordering:
+  - `SHOOT`: left click primary target.
+  - `DOUBLE_SHOOT`: left click primary target, wait command delay, left click
+    secondary target.
+  - `UI_CLICK`: UI click primary target.
+  - `SWAP_SHOOT`: right click, wait `150 ms`, left click primary target.
+  - `SWAP_DOUBLE_SHOOT`: right click, wait `150 ms`, left click primary target,
+    wait command delay, left click secondary target.
+- Rejects shoot/click commands with missing required targets.
+- Keeps execution planning pure and testable through `ExecutionPlan`.
+- Adds `execute_plan()` as a small dispatcher over an explicit `ExecutionDriver`
+  protocol.
+- Adds `Win32CommandExecutor` for physical `SendInput` and virtual/background
+  window-message execution.
+- Preserves prototype click timings for physical and virtual shoot/UI clicks, and
+  the prototype virtual right-click-at-window-center behavior.
+- Keeps live capture, arm/safe hotkeys, GUI state, UI detection, INI loading, and
+  static-runtime loop wiring outside this slice.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_control_execution.py tests\test_control_commands.py` passed: 11 tests.
+- `.venv\Scripts\python -m pytest` passed: 180 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
 ### Static Runtime Orchestrator Baseline
 
 Migrated the pure static-background runtime frame orchestrator that threads mode,
