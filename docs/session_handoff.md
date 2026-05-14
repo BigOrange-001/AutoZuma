@@ -41,6 +41,7 @@ The current refactor has completed the foundation layers:
 - Pure command-result action updates and cooldown planning.
 - Rich static-frame decision results and pure stateful static-frame fire/swap gating.
 - Pure runtime rescue/endgame mode detection and mode-scoped parameter resolution.
+- Pure runtime strategy-parameter adapter from raw/shared params into pipeline params.
 
 No live game automation, mouse execution, GUI, frame capture, UI state handling, swap execution, or command execution has been done yet.
 
@@ -440,6 +441,23 @@ Behavior:
 - Preserves prototype rank-to-weight mapping: `int(rank)`, then `10 ** (6 - rank)`.
 - Does not load INI files, own GUI state, or mutate shared params.
 
+### Runtime Strategy Parameter Adapter
+
+File: `src/autozuma/runtime/strategy_config.py`
+
+Behavior:
+
+- Builds concrete `RuntimeStrategyConfig` from a raw mapping plus `RuntimeModeState`.
+- Produces `RuntimeModeParams` for rescue/endgame detection.
+- Produces `StatefulStaticFrameDecisionParams` and nested `StaticFrameDecisionParams` for the pure static-frame pipeline.
+- Maps mode-scoped `FIRE_COOLDOWN`, `M_GAP`, `COMBO_HANG_BASE`, `COMBO_HANG_MULT`, `SOFT_LOCK_RADIUS`, and `PREDICT_MULT`.
+- Maps unscoped/general `COIN_BREAK_DELAY`, `TRACK_START_EXCLUDE`, and `TRACK_END_EXCLUDE` through existing resolver fallback behavior.
+- Applies `M_GAP` to target selection, coin scoring, and fallback discard.
+- Converts `COIN_BREAK_DELAY` seconds to breakthrough coin delay milliseconds and also carries seconds into command outcome planning.
+- Maps ranked priorities for coin, combo, rollback elimination, normal elimination, and pair targets.
+- Accepts explicit `active_coins` and passes them through to `StaticFrameDecisionParams`.
+- Does not read INI files, own GUI state, mutate shared params, capture frames, or execute commands.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -465,24 +483,26 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 165 passed
+- `pytest`: 169 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
-Last targeted runtime mode/param check:
+Last targeted runtime strategy config check:
 
-- `.venv\Scripts\python -m pytest tests\test_runtime_modes.py tests\test_runtime_params.py`: 15 passed
+- `.venv\Scripts\python -m pytest tests\test_runtime_strategy_config.py tests\test_runtime_params.py`: 10 passed
 
 ## Next Recommended Step
 
-The next clean step is to add a pure runtime strategy-parameter adapter.
+The next clean step is to add a pure static-runtime orchestrator state.
 
 Suggested scope:
 
-- Given a raw parameter mapping plus `RuntimeModeState`, produce the concrete `StaticFrameDecisionParams`, `StatefulStaticFrameDecisionParams`, `RuntimeModeParams`, and coin/action timing params used by the existing pure pipeline.
-- Preserve prototype mappings for `FIRE_COOLDOWN`, `M_GAP`, `COMBO_HANG_BASE`, `COMBO_HANG_MULT`, `SOFT_LOCK_RADIUS`, `PREDICT_MULT`, `COIN_BREAK_DELAY`, `RESCUE_TH`, `ENDGAME_SPAWN_TH`, `TRACK_START_EXCLUDE`, and `TRACK_END_EXCLUDE`.
-- Preserve ranked priority mapping for coin/combo/rollback/elim/pair priorities.
-- Keep INI file IO, GUI controls, live capture, mouse execution, and UI handling outside this slice.
+- Given one already-captured raw frame, current runtime state, raw/shared params, level assets, and launcher templates, run the pure static frame pipeline end-to-end.
+- Thread `RuntimeModeState`, `CommandOutcomeState`, and `CoinTrackerState` through a single immutable runtime state object.
+- Detect/update active coins from the aligned static ROI before building `RuntimeStrategyConfig`.
+- Update runtime mode state from the perceived `WorldState` and current mode params.
+- Return the detailed decision result plus updated runtime state.
+- Keep actual screen capture, window discovery, mouse execution, GUI controls, and UI-state clicks outside this slice.
 
 ## Design Rules To Preserve
 

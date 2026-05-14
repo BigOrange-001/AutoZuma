@@ -2,6 +2,45 @@
 
 ## 2026-05-14
 
+### Runtime Strategy Parameter Adapter Baseline
+
+Migrated the pure adapter from prototype-style raw/shared parameters into concrete
+strategy pipeline parameter objects.
+
+Added:
+
+- `src/autozuma/runtime/strategy_config.py`.
+- `RuntimeStrategyConfig`.
+- `build_runtime_strategy_config()`.
+- Runtime strategy config tests in `tests/test_runtime_strategy_config.py`.
+
+Behavior:
+
+- Builds `RuntimeModeParams` from raw `RESCUE_TH` and `ENDGAME_SPAWN_TH`.
+- Builds `StatefulStaticFrameDecisionParams` and nested `StaticFrameDecisionParams`
+  for the existing pure static-frame decision pipeline.
+- Maps mode-scoped `FIRE_COOLDOWN`, `M_GAP`, `COMBO_HANG_BASE`,
+  `COMBO_HANG_MULT`, `SOFT_LOCK_RADIUS`, and `PREDICT_MULT`.
+- Maps unscoped/general `COIN_BREAK_DELAY`, `TRACK_START_EXCLUDE`, and
+  `TRACK_END_EXCLUDE` through the existing resolver fallback behavior.
+- Applies `M_GAP` consistently to target selection, fallback discard, and coin
+  line-of-sight scoring.
+- Converts `COIN_BREAK_DELAY` seconds into breakthrough coin command delay
+  milliseconds while also carrying seconds into command outcome cooldown planning.
+- Maps ranked priorities for coin, combo, rollback elimination, normal
+  elimination, and pair targets using the existing `10 ** (6 - rank)` formula.
+- Preserves rescue-over-endgame mode priority through `RuntimeModeState.mode`.
+- Keeps this slice pure: no INI file IO, GUI controls, live capture, mouse
+  execution, or UI handling.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_strategy_config.py tests\test_runtime_params.py` passed: 10 tests.
+- `.venv\Scripts\python -m pytest` passed: 169 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
 ### Runtime Mode And Parameter Resolution Baseline
 
 Migrated the pure rescue/endgame mode state and prototype-style parameter
