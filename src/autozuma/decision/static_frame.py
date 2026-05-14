@@ -142,11 +142,43 @@ def decide_stateful_static_frame(
         state=state,
         current_time=current_time,
     )
-    can_swap = current_time - state.last_swap_time >= params.swap_cooldown
-    decision = decide_static_frame(
-        frame_bgr=frame_bgr,
+    roi_result = extract_game_roi(frame_bgr, level)
+    world_state = detect_static_world_state_from_roi(
+        frame_roi_bgr=roi_result.frame,
         level=level,
         launcher_templates=launcher_templates,
+        p_start_exclude=frame_params.p_start_exclude,
+        p_end_exclude=frame_params.p_end_exclude,
+    )
+    return decide_stateful_static_frame_from_world(
+        roi_result=roi_result,
+        world_state=world_state,
+        level=level,
+        state=state,
+        current_time=current_time,
+        params=params,
+    )
+
+
+def decide_stateful_static_frame_from_world(
+    roi_result: GameRoiResult,
+    world_state: WorldState,
+    level: LevelRuntimeAssets,
+    state: CommandOutcomeState,
+    current_time: float,
+    params: StatefulStaticFrameDecisionParams = StatefulStaticFrameDecisionParams(),
+) -> StatefulStaticFrameDecisionResult:
+    """Return a stateful pure decision from an already-extracted ROI/world state."""
+    frame_params = _params_with_action_state(
+        params.frame_decision,
+        state=state,
+        current_time=current_time,
+    )
+    can_swap = current_time - state.last_swap_time >= params.swap_cooldown
+    decision = decide_static_frame_from_world(
+        roi_result=roi_result,
+        world_state=world_state,
+        level=level,
         params=frame_params,
         allow_swap=can_swap,
     )

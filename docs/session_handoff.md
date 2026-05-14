@@ -42,8 +42,9 @@ The current refactor has completed the foundation layers:
 - Rich static-frame decision results and pure stateful static-frame fire/swap gating.
 - Pure runtime rescue/endgame mode detection and mode-scoped parameter resolution.
 - Pure runtime strategy-parameter adapter from raw/shared params into pipeline params.
+- Pure static-runtime single-frame orchestrator for ROI, coins, mode, decisions, and runtime state.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, swap execution, or command execution has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, swap execution, command execution, or INI/GUI parameter loading has been done yet.
 
 ## Important Paths
 
@@ -409,6 +410,7 @@ Behavior:
 - Also exposes `decide_static_frame()` with `StaticFrameDecisionResult` for detailed ROI/world/candidate/swap/target/command output.
 - Also exposes `decide_static_frame_from_world()` for already-extracted ROI and perceived world-state callers.
 - Also exposes `decide_stateful_static_frame()` with `StatefulStaticFrameDecisionResult`.
+- Also exposes `decide_stateful_static_frame_from_world()` so runtime orchestrators can reuse a previously extracted ROI/world state.
 - Stateful static-frame decision injects action state into target scoring, applies active virtual balls to clusters, gates swap with the prototype `0.5s` cooldown, gates fire readiness with `next_fire_ready_time`, and calls command-outcome updates only for emitted shoot commands.
 - Remains pure and single-frame: no live capture, mouse execution, sleeping, swap execution, or UI handling.
 
@@ -458,6 +460,23 @@ Behavior:
 - Accepts explicit `active_coins` and passes them through to `StaticFrameDecisionParams`.
 - Does not read INI files, own GUI state, mutate shared params, capture frames, or execute commands.
 
+### Static Runtime Orchestrator
+
+File: `src/autozuma/runtime/static_runtime.py`
+
+Behavior:
+
+- Represents single-frame static runtime state as immutable `StaticRuntimeState`.
+- Carries `RuntimeModeState` and `CommandOutcomeState` together.
+- Provides `initial_static_runtime_state(current_time)` for new static-level sessions.
+- `run_static_runtime_frame()` accepts an already-captured raw BGR frame, static level assets, launcher templates, runtime state, current time, and raw/shared parameter mapping.
+- Extracts static ROI once and reuses it for coin detection, world perception, and decision generation.
+- Updates active coin tracking from the aligned ROI and static background before strategy config creation.
+- Threads `CoinTrackerState` through `CommandOutcomeState`, including command-outcome coin locks.
+- Detects world state from the aligned ROI, updates runtime mode, rebuilds strategy config for the updated mode, and then runs `decide_stateful_static_frame_from_world()`.
+- Returns detailed `StaticRuntimeFrameResult` with final state, stateful decision result, coin update, mode update, and concrete strategy config.
+- Does not capture the screen, discover windows, sleep, execute mouse input, click UI, load INI files, or own GUI controls.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -483,26 +502,25 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 169 passed
+- `pytest`: 172 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
-Last targeted runtime strategy config check:
+Last targeted static-runtime check:
 
-- `.venv\Scripts\python -m pytest tests\test_runtime_strategy_config.py tests\test_runtime_params.py`: 10 passed
+- `.venv\Scripts\python -m pytest tests\test_runtime_static_runtime.py tests\test_static_frame_decision.py`: 15 passed
 
 ## Next Recommended Step
 
-The next clean step is to add a pure static-runtime orchestrator state.
+The next clean step is to migrate command execution planning and Win32 execution boundaries.
 
 Suggested scope:
 
-- Given one already-captured raw frame, current runtime state, raw/shared params, level assets, and launcher templates, run the pure static frame pipeline end-to-end.
-- Thread `RuntimeModeState`, `CommandOutcomeState`, and `CoinTrackerState` through a single immutable runtime state object.
-- Detect/update active coins from the aligned static ROI before building `RuntimeStrategyConfig`.
-- Update runtime mode state from the perceived `WorldState` and current mode params.
-- Return the detailed decision result plus updated runtime state.
-- Keep actual screen capture, window discovery, mouse execution, GUI controls, and UI-state clicks outside this slice.
+- Add a platform-facing control/execution module that converts pure `Command` values into an execution plan for shoot, double-shoot, swap-shoot, swap-double-shoot, and UI click.
+- Preserve prototype command timing semantics: right-click swap before swapped shots, inter-shot delay for double shots, and primary/secondary target ordering.
+- Keep pure plan generation separate from actual Win32 `SendInput` / virtual message execution.
+- Then migrate the minimal Win32 executor behind an explicit side-effect boundary.
+- Keep live capture, GUI panel, UI-state detection, and dynamic-background `space` handling outside this immediate slice unless the next session intentionally chooses one of those instead.
 
 ## Design Rules To Preserve
 

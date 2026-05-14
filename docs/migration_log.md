@@ -2,6 +2,50 @@
 
 ## 2026-05-14
 
+### Static Runtime Orchestrator Baseline
+
+Migrated the pure static-background runtime frame orchestrator that threads mode,
+coin, action, and decision state through one already-captured frame.
+
+Added:
+
+- `src/autozuma/runtime/static_runtime.py`.
+- `StaticRuntimeState`, `StaticRuntimeFrameParams`, and `StaticRuntimeFrameResult`.
+- `initial_static_runtime_state()`.
+- `run_static_runtime_frame()`.
+- `decide_stateful_static_frame_from_world()` in `src/autozuma/decision/static_frame.py`.
+- Runtime static-frame orchestration tests in `tests/test_runtime_static_runtime.py`.
+
+Behavior:
+
+- Accepts one raw BGR frame, static level assets, launcher templates, current
+  immutable runtime state, current time, and raw/shared parameter mapping.
+- Extracts the aligned static ROI once, then reuses it for coin tracking, world
+  perception, and decision generation.
+- Updates active coin tracking from the aligned ROI and static background before
+  building final strategy parameters.
+- Threads `CoinTrackerState` through `CommandOutcomeState`, including later coin
+  locks produced by command outcome updates.
+- Detects static world state from the already-aligned ROI.
+- Updates `RuntimeModeState` from the perceived world state and mode thresholds.
+- Rebuilds strategy configuration after mode update so the emitted decision uses
+  normal/rescue/endgame scoped priorities and timing.
+- Calls `decide_stateful_static_frame_from_world()` so action-state locks, virtual
+  balls, fire cooldown, swap cooldown, and command outcome updates are all applied
+  without repeating ROI extraction.
+- Returns detailed coin update, mode update, strategy config, decision result, and
+  final runtime state.
+- Keeps this slice pure with respect to the host: no screen capture, window
+  discovery, sleeping, mouse execution, UI clicks, GUI controls, or INI file IO.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_static_runtime.py tests\test_static_frame_decision.py` passed: 15 tests.
+- `.venv\Scripts\python -m pytest` passed: 172 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
 ### Runtime Strategy Parameter Adapter Baseline
 
 Migrated the pure adapter from prototype-style raw/shared parameters into concrete
