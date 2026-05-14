@@ -6,12 +6,18 @@ import math
 from dataclasses import dataclass
 
 from autozuma.core.models import (
+    BallEntity,
     Cluster,
     LevelRuntimeAssets,
     Point,
     TargetCandidate,
     TrackGeometry,
     WorldState,
+)
+from autozuma.strategy.actions import (
+    ActionTrackerState,
+    is_cluster_locked,
+    is_deadzone_locked,
 )
 from autozuma.vision.colors import UNKNOWN_COLOR
 
@@ -35,6 +41,9 @@ class TargetScoringParams:
     min_straightness: float = 0.86
     combo_depth_bonus: float = 0.6
     max_combo_depth_bonus: float = 2.0
+    action_state: ActionTrackerState | None = None
+    current_time: float = 0.0
+    soft_lock_radius: float = 35.0
 
 
 def score_basic_targets(
@@ -73,6 +82,14 @@ def score_basic_targets_for_color(
         track = _find_track(level, cluster.track_id)
         if track is None:
             continue
+        center_point, center_entity = _cluster_target_context(cluster)
+        if _is_action_locked(
+            center_point=center_point,
+            center_entity=center_entity,
+            cluster=cluster,
+            params=params,
+        ):
+            continue
 
         candidate = _score_cluster(
             clusters=world_state.clusters,
@@ -104,9 +121,7 @@ def _score_cluster(
     params: TargetScoringParams,
 ) -> TargetCandidate:
     cluster = clusters[cluster_idx]
-    center_x = sum(entity.x for entity in cluster.entities) / cluster.size
-    center_y = sum(entity.y for entity in cluster.entities) / cluster.size
-    center_entity = cluster.entities[len(cluster.entities) // 2]
+    center_point, center_entity = _cluster_target_context(cluster)
     track_idx = _clamp_track_idx(center_entity.track_idx, track)
 
     target_type, base_score, combo_depth = _classify_target(
@@ -115,9 +130,9 @@ def _score_cluster(
         target_color=target_color,
         params=params,
     )
-    distance = math.hypot(center_x - frog_pivot.x, center_y - frog_pivot.y)
+    distance = math.hypot(center_point.x - frog_pivot.x, center_point.y - frog_pivot.y)
     orthogonality = _shot_track_orthogonality(
-        target=Point(x=center_x, y=center_y),
+        target=center_point,
         frog_pivot=frog_pivot,
         track=track,
         track_idx=track_idx,
@@ -139,8 +154,8 @@ def _score_cluster(
         final_score /= params.bad_geometry_penalty
 
     return TargetCandidate(
-        x=center_x,
-        y=center_y,
+        x=center_point.x,
+        y=center_point.y,
         score=final_score,
         target_type=target_type,
         reason=(
@@ -153,6 +168,36 @@ def _score_cluster(
         track_idx=center_entity.track_idx,
         cluster_start_idx=cluster.start_idx,
         cluster_end_idx=cluster.end_idx,
+    )
+
+
+def _cluster_target_context(cluster: Cluster) -> tuple[Point, BallEntity]:
+    center_x = sum(entity.x for entity in cluster.entities) / cluster.size
+    center_y = sum(entity.y for entity in cluster.entities) / cluster.size
+    center_entity = cluster.entities[len(cluster.entities) // 2]
+    return Point(x=center_x, y=center_y), center_entity
+
+
+def _is_action_locked(
+    center_point: Point,
+    center_entity: BallEntity,
+    cluster: Cluster,
+    params: TargetScoringParams,
+) -> bool:
+    if params.action_state is None:
+        return False
+    if is_deadzone_locked(
+        state=params.action_state,
+        point=center_point,
+        radius=params.soft_lock_radius,
+        current_time=params.current_time,
+    ):
+        return True
+    return is_cluster_locked(
+        state=params.action_state,
+        track_id=cluster.track_id,
+        track_idx=center_entity.track_idx,
+        current_time=params.current_time,
     )
 
 

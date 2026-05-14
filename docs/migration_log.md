@@ -92,6 +92,63 @@ Validation:
 - `.venv\Scripts\python -m ruff check .` passed.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
 
+### Action Tracker State Baseline
+
+Migrated the explicit action-memory state portion of prototype `logic/tracker.py::ActionTracker`.
+
+Added:
+
+- `src/autozuma/strategy/actions.py`.
+- Action tracker state tests in `tests/test_strategy_actions.py`.
+
+Behavior:
+
+- Represents deadzones, cluster locks, and virtual balls as immutable dataclasses.
+- Replaces hidden `time.time()` reads with explicit `current_time` inputs.
+- Adds pure helpers for appending deadzones, cluster locks, and virtual balls.
+- Adds pure query helpers for active deadzone and cluster-lock checks.
+- Preserves prototype deadzone behavior: squared distance must be strictly less than `radius ** 2`.
+- Preserves prototype cluster lock behavior: same track and `start_idx - 5 <= track_idx <= end_idx + 5`.
+- Preserves prototype virtual ball expiry behavior: entries are active only while `expires_at > current_time`.
+- Adds `prune_action_tracker_state()` for removing expired memory.
+- Keeps command-result state updates, cooldowns, and mouse execution as separate follow-up steps.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_strategy_actions.py` passed: 9 tests.
+- `.venv\Scripts\python -m pytest` passed: 134 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Action Tracker Strategy Integration Baseline
+
+Connected the action-memory state to pure target scoring and virtual-ball cluster sizing.
+
+Changed:
+
+- Added `virtual_size_bonus` to `Cluster`.
+- Added `apply_virtual_balls_to_clusters()` in `src/autozuma/strategy/actions.py`.
+- Added optional action-state fields to `TargetScoringParams`.
+- Added lock-aware target scoring tests in `tests/test_strategy_targets.py`.
+- Added virtual-ball cluster-size injection tests in `tests/test_strategy_actions.py`.
+
+Behavior:
+
+- Virtual balls can be counted into cluster size without mutating detected ball entities.
+- Preserves prototype virtual-ball injection rule: same track, same color, and `cluster.start_idx - 30 <= virtual.track_idx <= cluster.end_idx + 30`.
+- Each active virtual ball is applied to the first matching cluster, matching the prototype's `break` behavior.
+- Target scoring can skip targets whose center point is inside an active deadzone.
+- Target scoring can skip targets whose center track index is inside an active cluster lock.
+- Expired action-memory entries are ignored by the scoring filters.
+- Existing callers remain unchanged unless they pass action state through `TargetScoringParams`.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_strategy_actions.py tests\test_strategy_targets.py` passed: 25 tests.
+- `.venv\Scripts\python -m pytest` passed: 139 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
 ## 2026-05-13
 
 ### Asset Migration Baseline

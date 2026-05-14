@@ -35,8 +35,11 @@ The current refactor has completed the foundation layers:
 - Pure command variants for `DOUBLE_SHOOT` and `SWAP_DOUBLE_SHOOT`.
 - Pure coin target scoring for direct and breakthrough coin shots.
 - Active coin detection/tracking with explicit state and locks.
+- Action tracker state for deadzones, cluster locks, and virtual balls.
+- Lock-aware target scoring using action deadzones and cluster locks.
+- Pure virtual-ball cluster-size injection.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, action tracker locks, swap cooldown/execution, runtime cooldowns, or command execution has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, command-result action updates, swap cooldown/execution, runtime cooldowns, or command execution has been done yet.
 
 ## Important Paths
 
@@ -70,6 +73,8 @@ Current model groups:
 - Future gameplay skeletons: `BallEntity`, `Cluster`, `LauncherState`, `WorldState`, `TargetCandidate`, `Command`
 
 `TargetCandidate` now includes optional combo depth, topology context fields for track id, target track index, and cluster start/end indices, plus optional secondary target coordinates and delay metadata for double-shot command variants.
+
+`Cluster` now includes `virtual_size_bonus`; `Cluster.size` is detected entity count plus virtual size bonus.
 
 ### Asset Loading And Validation
 
@@ -305,6 +310,37 @@ Behavior:
 - Supports scoring current-ball and next-ball coin targets before the existing pure swap decision.
 - Keeps the slice pure and stateless: no coin lifetime tracking, coin locks, frame differencing, cooldowns, action tracker, or mouse execution.
 
+### Action Tracker State
+
+File: `src/autozuma/strategy/actions.py`
+
+Behavior:
+
+- Represents deadzones, cluster locks, and virtual balls as explicit immutable state.
+- Uses caller-supplied `current_time`; no hidden `time.time()` reads.
+- Provides pure helpers to add deadzones, cluster locks, and virtual balls.
+- Provides pure queries for deadzone locks and cluster locks.
+- Preserves prototype deadzone behavior: squared distance must be strictly less than `radius ** 2`.
+- Preserves prototype cluster lock behavior: same track and default `5` index padding around the locked range.
+- Preserves prototype virtual ball expiry behavior: active while `expires_at > current_time`.
+- Provides pure virtual-ball cluster-size injection.
+- Preserves prototype virtual-ball injection rule: same track, same color, and `cluster.start_idx - 30 <= virtual.track_idx <= cluster.end_idx + 30`.
+- Applies each active virtual ball to the first matching cluster, matching the prototype's `break` behavior.
+- Provides pruning of expired action-memory entries.
+- Does not yet update action state after selected commands.
+
+### Lock-Aware Target Scoring
+
+File: `src/autozuma/strategy/targets.py`
+
+Behavior:
+
+- `TargetScoringParams` can optionally carry `ActionTrackerState`, `current_time`, and `soft_lock_radius`.
+- Target scoring skips a candidate when the candidate center is inside an active deadzone.
+- Target scoring skips a candidate when the candidate center track index is inside an active cluster lock.
+- Expired action-memory entries are ignored.
+- Existing callers keep previous behavior when no action state is supplied.
+
 ### Basic Strategy Command Generation
 
 File: `src/autozuma/strategy/commands.py`
@@ -374,23 +410,23 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 125 passed
+- `pytest`: 139 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
-Last targeted active-coin check:
+Last targeted action integration check:
 
-- `.venv\Scripts\python -m pytest tests\test_vision_coins.py`: 13 passed
+- `.venv\Scripts\python -m pytest tests\test_strategy_actions.py tests\test_strategy_targets.py`: 25 passed
 
 ## Next Recommended Step
 
-The next clean step is to migrate the pure action tracker state slice used by targeting and cooldown decisions.
+The next clean step is to migrate pure command-result action updates and cooldown planning.
 
 Suggested scope:
 
-- Keep it explicit and testable with caller-supplied `current_time`.
-- Preserve prototype concepts from `logic/tracker.py::ActionTracker`: deadzones, cluster locks, and virtual balls.
-- Do not couple it to live frame capture, mouse execution, or the static-frame decision pipeline until the state behavior is covered.
+- Given a selected command/target class, compute updated `ActionTrackerState`, coin locks, swap timestamp, and next fire-ready time.
+- Preserve prototype behavior for combo locks, adjacent combo locks, elim deadzones, pair virtual balls, direct coin locks, and breakthrough coin locks.
+- Keep actual sleeping, right-click execution, and mouse input outside this slice.
 - Do not add live capture, mouse execution, GUI, runtime cooldowns, or UI handling in the same step unless there is a specific reason.
 
 ## Design Rules To Preserve

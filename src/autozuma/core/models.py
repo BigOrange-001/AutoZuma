@@ -140,10 +140,11 @@ class Cluster:
     entities: tuple[BallEntity, ...]
     start_idx: int
     end_idx: int
+    virtual_size_bonus: int = 0
 
     @property
     def size(self) -> int:
-        return len(self.entities)
+        return len(self.entities) + self.virtual_size_bonus
 
 
 @dataclass(frozen=True)

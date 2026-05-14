@@ -11,6 +11,7 @@ from autozuma.core.models import (
     TrackGeometry,
     WorldState,
 )
+from autozuma.strategy.actions import ActionTrackerState, ClusterLock, Deadzone
 from autozuma.strategy.targets import (
     COMBO_TARGET,
     ELIM_TARGET,
@@ -165,6 +166,64 @@ def test_score_basic_targets_skips_unknown_clusters_when_scanning_neighbors():
 
     assert len(targets) == 1
     assert targets[0].target_type == COMBO_TARGET
+
+
+def test_score_basic_targets_skips_cluster_inside_active_deadzone():
+    cluster = _cluster("red", 2, 30)
+    world_state = _world_state(current_ball="red", clusters=(cluster,))
+
+    targets = score_basic_targets(
+        world_state=world_state,
+        level=_level(),
+        params=TargetScoringParams(
+            action_state=ActionTrackerState(
+                deadzones=(Deadzone(point=Point(x=31.0, y=50.0), expires_at=12.0),)
+            ),
+            current_time=10.0,
+            soft_lock_radius=35.0,
+        ),
+    )
+
+    assert targets == ()
+
+
+def test_score_basic_targets_ignores_expired_deadzone():
+    cluster = _cluster("red", 2, 30)
+    world_state = _world_state(current_ball="red", clusters=(cluster,))
+
+    targets = score_basic_targets(
+        world_state=world_state,
+        level=_level(),
+        params=TargetScoringParams(
+            action_state=ActionTrackerState(
+                deadzones=(Deadzone(point=Point(x=31.0, y=50.0), expires_at=10.0),)
+            ),
+            current_time=10.0,
+            soft_lock_radius=35.0,
+        ),
+    )
+
+    assert len(targets) == 1
+
+
+def test_score_basic_targets_skips_cluster_inside_active_cluster_lock():
+    cluster = _cluster("red", 2, 30)
+    world_state = _world_state(current_ball="red", clusters=(cluster,))
+
+    targets = score_basic_targets(
+        world_state=world_state,
+        level=_level(),
+        params=TargetScoringParams(
+            action_state=ActionTrackerState(
+                cluster_locks=(
+                    ClusterLock(track_id=0, start_idx=20, end_idx=40, expires_at=12.0),
+                )
+            ),
+            current_time=10.0,
+        ),
+    )
+
+    assert targets == ()
 
 
 def _params() -> TargetScoringParams:
