@@ -34,8 +34,9 @@ The current refactor has completed the foundation layers:
 - Pure fallback discard target selection.
 - Pure command variants for `DOUBLE_SHOOT` and `SWAP_DOUBLE_SHOOT`.
 - Pure coin target scoring for direct and breakthrough coin shots.
+- Active coin detection/tracking with explicit state and locks.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, active coin detection/tracking, swap cooldown/execution, runtime cooldowns, or command execution has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, action tracker locks, swap cooldown/execution, runtime cooldowns, or command execution has been done yet.
 
 ## Important Paths
 
@@ -195,6 +196,22 @@ Behavior:
 - Accepts explicit `LevelRuntimeAssets` and `LauncherTemplateSet` inputs.
 - Returns `WorldState(level_id, launcher, entities, clusters)`.
 - Currently supports only static-background levels; `space` remains a special detection gap.
+
+### Active Coin Detection And Tracking
+
+File: `src/autozuma/vision/coins.py`
+
+Behavior:
+
+- Detects coin presence from aligned grayscale ROI and background frames at known topology treasure points.
+- Preserves prototype detection thresholds: ROI radius `12`, diff threshold `40`, active pixel count `>55`.
+- Uses explicit immutable `CoinTrackerState` instead of hidden mutable state.
+- Preserves prototype active lifetime window: alive time must be greater than `0.5s` and less than `7.0s`.
+- Preserves prototype stale timeout: missing coin tracks are dropped only after more than `0.4s`.
+- Preserves prototype lock radius `15` with explicit `CoinLock` values.
+- `update_active_coins_from_frame()` returns active coin `Point` values ready to pass into `StaticFrameDecisionParams.active_coins`.
+- Uses explicit `current_time`; no `time.time()` calls or live loop ownership.
+- Does not score coin targets, execute commands, enforce fire cooldowns, or perform mouse input.
 
 ### Strategy Target Scoring
 
@@ -357,23 +374,23 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 112 passed
+- `pytest`: 125 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
-Last targeted coin-scoring check:
+Last targeted active-coin check:
 
-- `.venv\Scripts\python -m pytest tests\test_strategy_coins.py tests\test_strategy_prediction.py tests\test_strategy_commands.py tests\test_static_frame_decision.py`: 27 passed
+- `.venv\Scripts\python -m pytest tests\test_vision_coins.py`: 13 passed
 
 ## Next Recommended Step
 
-The next clean step is to migrate active coin detection/tracking as an explicit, testable state slice.
+The next clean step is to migrate the pure action tracker state slice used by targeting and cooldown decisions.
 
 Suggested scope:
 
-- Keep frame differencing and lifetime/lock bookkeeping separate where practical.
-- Preserve prototype thresholds: treasure-point ROI radius `12`, diff threshold `40`, active pixel count `>55`, active lifetime `0.5..7.0s`, stale timeout `0.4s`, lock radius `15`.
-- Feed the resulting active coin points into the existing `StaticFrameDecisionParams.active_coins` path.
+- Keep it explicit and testable with caller-supplied `current_time`.
+- Preserve prototype concepts from `logic/tracker.py::ActionTracker`: deadzones, cluster locks, and virtual balls.
+- Do not couple it to live frame capture, mouse execution, or the static-frame decision pipeline until the state behavior is covered.
 - Do not add live capture, mouse execution, GUI, runtime cooldowns, or UI handling in the same step unless there is a specific reason.
 
 ## Design Rules To Preserve

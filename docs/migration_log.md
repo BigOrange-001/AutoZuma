@@ -61,6 +61,37 @@ Validation:
 - `.venv\Scripts\python -m ruff check .` passed.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
 
+### Active Coin Detection And Tracking Baseline
+
+Migrated the active coin detection/tracking slice from prototype `logic/tracker.py::CoinTracker`.
+
+Added:
+
+- `src/autozuma/vision/coins.py`.
+- Coin detection and tracking tests in `tests/test_vision_coins.py`.
+
+Behavior:
+
+- Detects coin presence by differencing an aligned grayscale ROI frame against the level background.
+- Preserves prototype coin-presence thresholds:
+  - treasure-point ROI radius: `12`;
+  - grayscale diff threshold: `40`;
+  - active foreground pixel count: `>55`.
+- Tracks coin lifetime with explicit immutable `CoinTrackerState`.
+- Preserves prototype active lifetime window: active only when alive time is greater than `0.5s` and less than `7.0s`.
+- Preserves prototype stale timeout: absent tracks are kept until they have been missing for more than `0.4s`.
+- Preserves prototype lock behavior with explicit `CoinLock` entries and lock radius `15`.
+- Provides `update_active_coins_from_frame()` as the frame-to-active-points bridge for callers that will feed `StaticFrameDecisionParams.active_coins`.
+- Replaces hidden `time.time()` reads with explicit `current_time` inputs.
+- Keeps the slice free of live capture, command execution, cooldowns, target scoring, and mouse input.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_vision_coins.py` passed: 13 tests.
+- `.venv\Scripts\python -m pytest` passed: 125 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
 ## 2026-05-13
 
 ### Asset Migration Baseline
