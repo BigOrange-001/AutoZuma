@@ -2,6 +2,52 @@
 
 ## 2026-05-14
 
+### Stateful Static Frame Decision Baseline
+
+Migrated the pure stateful static-frame planning boundary that connects frame
+decisions with action memory and cooldown state.
+
+Added:
+
+- `StaticFrameDecisionResult` in `src/autozuma/decision/static_frame.py`.
+- `decide_static_frame()` for detailed single-frame output while preserving
+  `decide_static_frame_command()` as the compatibility wrapper.
+- `decide_static_frame_from_world()` for callers/tests that already have an ROI and
+  perceived `WorldState`.
+- `StatefulStaticFrameDecisionParams` and `StatefulStaticFrameDecisionResult`.
+- `decide_stateful_static_frame()` for pure fire/swap gating plus command outcome
+  state updates.
+- Static-frame tests covering detailed results, fire gating, swap cooldown, action
+  state scoring, and outcome updates.
+
+Behavior:
+
+- The detailed result exposes ROI extraction, perceived world state, current and
+  next candidate sets, swap decision, predicted candidates, selected target,
+  ROI-local command, screen-frame command, and fallback usage.
+- The old `decide_static_frame_command()` API still returns only the final
+  screen-frame `Command`.
+- Stateful decision injects `CommandOutcomeState.action_tracker` into target scoring
+  with explicit `current_time`.
+- Active virtual balls are applied to perceived cluster sizes before the stateful
+  decision is finalized.
+- Swap gating preserves the prototype cooldown default of `0.5s` by forcing the
+  current-ball candidate set while still exposing next-ball scores in the result.
+- Fire gating emits `NO_OP` while `current_time < next_fire_ready_time` without
+  advancing fire or swap timestamps.
+- When a shoot command is emitted, `apply_command_outcome()` advances action memory,
+  coin locks, swap timestamp, fire-ready timestamp, and last-fire timestamp.
+- Keeps the slice pure: no live capture loop, sleeping, right-click execution, mouse
+  input, GUI, or UI handling.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_static_frame_decision.py tests\test_strategy_action_updates.py` passed: 18 tests.
+- `.venv\Scripts\python -m pytest` passed: 150 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
 ### Command Outcome Action Updates Baseline
 
 Migrated the pure command-result action-memory and cooldown-planning slice from the

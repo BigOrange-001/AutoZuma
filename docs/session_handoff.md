@@ -39,8 +39,9 @@ The current refactor has completed the foundation layers:
 - Lock-aware target scoring using action deadzones and cluster locks.
 - Pure virtual-ball cluster-size injection.
 - Pure command-result action updates and cooldown planning.
+- Rich static-frame decision results and pure stateful static-frame fire/swap gating.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, swap cooldown/execution, runtime cooldown gating, or command execution has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, swap execution, or command execution has been done yet.
 
 ## Important Paths
 
@@ -403,7 +404,11 @@ Behavior:
 - Preserves and maps secondary targets for double-shot command variants.
 - Returns fallback `CommandType.SHOOT` when no target is selected but discard is available.
 - Returns `CommandType.NO_OP` when no target is selected and discard is disabled or unavailable.
-- Remains pure and single-frame: no live capture, mouse execution, cooldowns, locks, or UI handling.
+- Also exposes `decide_static_frame()` with `StaticFrameDecisionResult` for detailed ROI/world/candidate/swap/target/command output.
+- Also exposes `decide_static_frame_from_world()` for already-extracted ROI and perceived world-state callers.
+- Also exposes `decide_stateful_static_frame()` with `StatefulStaticFrameDecisionResult`.
+- Stateful static-frame decision injects action state into target scoring, applies active virtual balls to clusters, gates swap with the prototype `0.5s` cooldown, gates fire readiness with `next_fire_ready_time`, and calls command-outcome updates only for emitted shoot commands.
+- Remains pure and single-frame: no live capture, mouse execution, sleeping, swap execution, or UI handling.
 
 ## Migrated Assets
 
@@ -430,24 +435,25 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 145 passed
+- `pytest`: 150 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
-Last targeted command outcome/action integration check:
+Last targeted stateful decision/action integration check:
 
-- `.venv\Scripts\python -m pytest tests\test_strategy_action_updates.py tests\test_strategy_actions.py tests\test_strategy_targets.py tests\test_vision_coins.py`: 44 passed
+- `.venv\Scripts\python -m pytest tests\test_static_frame_decision.py tests\test_strategy_action_updates.py`: 18 passed
 
 ## Next Recommended Step
 
-The next clean step is to expose a richer pure frame-decision result and then wire cooldown/action state through it.
+The next clean step is to migrate runtime mode detection and parameter resolution.
 
 Suggested scope:
 
-- Return the selected target, swap choice, world state, ROI result, and command from the pure static-frame pipeline, not only the final mapped command.
-- Add a pure stateful wrapper that accepts `CommandOutcomeState`, applies action-state-aware scoring, gates fire readiness using `next_fire_ready_time`, enforces swap readiness using `last_swap_time`, and calls `apply_command_outcome()` only when a command is actually emitted.
-- Preserve the existing `decide_static_frame_command()` API as a convenience wrapper if possible.
-- Keep actual sleeping, right-click execution, mouse input, live capture, GUI, and UI handling outside this slice.
+- Given a perceived `WorldState`, `LevelRuntimeAssets`, previous mode state, and `current_time`, compute rescue/endgame/normal mode state.
+- Preserve prototype rescue detection from distance-to-track-end threshold.
+- Preserve prototype spawn/endgame timing windows: sustained spawn near start clears endgame, and lack of spawn for the timeout enables endgame.
+- Add pure parameter resolution for `N_*`, `R_*`, and `E_*` scoped strategy settings and priority-rank mapping.
+- Keep live capture, GUI controls, mouse execution, and UI handling outside this slice.
 
 ## Design Rules To Preserve
 

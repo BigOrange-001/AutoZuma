@@ -17,7 +17,15 @@ from autozuma.core.models import (
     TrackGeometry,
     WorldState,
 )
-from autozuma.decision.static_frame import StaticFrameDecisionParams, decide_static_frame_command
+from autozuma.decision.static_frame import (
+    StatefulStaticFrameDecisionParams,
+    StaticFrameDecisionParams,
+    decide_stateful_static_frame,
+    decide_static_frame,
+    decide_static_frame_command,
+)
+from autozuma.strategy.action_updates import CommandOutcomeParams, CommandOutcomeState
+from autozuma.strategy.actions import ActionTrackerState, Deadzone
 from autozuma.strategy.coins import CoinScoringParams
 from autozuma.strategy.discard import DiscardParams
 from autozuma.strategy.prediction import TargetPredictionParams
@@ -76,6 +84,38 @@ def test_decide_static_frame_command_returns_screen_shoot_for_clear_target(monke
     assert command.secondary_target is None
     assert calls["roi"] == (raw_frame, level)
     assert calls["world"] == (roi_frame, level, template_set, 11.0, 22.0)
+
+
+def test_decide_static_frame_returns_detailed_result(monkeypatch):
+    raw_frame = np.zeros((30, 30, 3), dtype=np.uint8)
+    roi_frame = np.full((20, 20, 3), 9, dtype=np.uint8)
+    level = _level()
+    template_set = LauncherTemplateSet(search_radius=5, step_degrees=5, templates={})
+    roi_result = GameRoiResult(frame=roi_frame, offset=Point(x=10, y=20), confidence=1.0)
+    world_state = _world_state(current_color="red")
+
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.extract_game_roi",
+        lambda frame_bgr, level: roi_result,
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.detect_static_world_state_from_roi",
+        lambda **kwargs: world_state,
+    )
+
+    result = decide_static_frame(
+        frame_bgr=raw_frame,
+        level=level,
+        launcher_templates=template_set,
+    )
+
+    assert result.roi_result == roi_result
+    assert result.world_state == world_state
+    assert result.selected_target is not None
+    assert result.roi_command.command_type == CommandType.SHOOT
+    assert result.screen_command.primary_target == Point(x=110.0, y=137.0)
+    assert result.current_candidates
+    assert result.predicted_candidates
 
 
 def test_decide_static_frame_command_returns_screen_no_op_without_target(monkeypatch):
@@ -387,6 +427,165 @@ def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
     assert calls["swap"] == swap_params
     assert calls["predict"] == prediction_params
     assert calls["select"] == selection_params
+
+
+def test_decide_stateful_static_frame_blocks_fire_until_ready(monkeypatch):
+    raw_frame = np.zeros((30, 30, 3), dtype=np.uint8)
+    roi_frame = np.full((20, 20, 3), 9, dtype=np.uint8)
+    level = _level()
+    template_set = LauncherTemplateSet(search_radius=5, step_degrees=5, templates={})
+
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.extract_game_roi",
+        lambda frame_bgr, level: GameRoiResult(
+            frame=roi_frame,
+            offset=Point(x=10, y=20),
+            confidence=1.0,
+        ),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.detect_static_world_state_from_roi",
+        lambda **kwargs: _world_state(current_color="red"),
+    )
+
+    result = decide_stateful_static_frame(
+        frame_bgr=raw_frame,
+        level=level,
+        launcher_templates=template_set,
+        state=CommandOutcomeState(next_fire_ready_time=20.0, last_fire_time=8.0),
+        current_time=10.0,
+    )
+
+    assert not result.can_fire
+    assert result.decision.selected_target is not None
+    assert result.decision.screen_command.command_type == CommandType.NO_OP
+    assert result.state.last_fire_time == 8.0
+    assert result.state.next_fire_ready_time == 20.0
+
+
+def test_decide_stateful_static_frame_blocks_swap_during_cooldown(monkeypatch):
+    raw_frame = np.zeros((30, 30, 3), dtype=np.uint8)
+    roi_frame = np.full((20, 20, 3), 9, dtype=np.uint8)
+    level = _level()
+    template_set = LauncherTemplateSet(search_radius=5, step_degrees=5, templates={})
+    world_state = WorldState(
+        level_id="test",
+        launcher=LauncherState(current_ball="red", next_ball="yellow", next_position=None),
+        entities=(),
+        clusters=(),
+    )
+
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.extract_game_roi",
+        lambda frame_bgr, level: GameRoiResult(
+            frame=roi_frame,
+            offset=Point(x=10, y=20),
+            confidence=1.0,
+        ),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.detect_static_world_state_from_roi",
+        lambda **kwargs: world_state,
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.score_basic_targets",
+        lambda **kwargs: (_target_candidate(x=20.0, y=20.0, score=10.0, track_idx=20),),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.score_basic_targets_for_color",
+        lambda **kwargs: (_target_candidate(x=100.0, y=100.0, score=20.0, track_idx=100),),
+    )
+
+    result = decide_stateful_static_frame(
+        frame_bgr=raw_frame,
+        level=level,
+        launcher_templates=template_set,
+        state=CommandOutcomeState(last_swap_time=9.75),
+        current_time=10.0,
+        params=StatefulStaticFrameDecisionParams(swap_cooldown=0.5),
+    )
+
+    assert not result.can_swap
+    assert result.decision.swap_decision.reason == "swap cooldown active"
+    assert result.decision.screen_command.command_type == CommandType.SHOOT
+    assert result.state.last_swap_time == 9.75
+
+
+def test_decide_stateful_static_frame_wires_action_state_into_scoring(monkeypatch):
+    raw_frame = np.zeros((30, 30, 3), dtype=np.uint8)
+    roi_frame = np.full((20, 20, 3), 9, dtype=np.uint8)
+    level = _level()
+    template_set = LauncherTemplateSet(search_radius=5, step_degrees=5, templates={})
+
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.extract_game_roi",
+        lambda frame_bgr, level: GameRoiResult(
+            frame=roi_frame,
+            offset=Point(x=10, y=20),
+            confidence=1.0,
+        ),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.detect_static_world_state_from_roi",
+        lambda **kwargs: _world_state(current_color="red"),
+    )
+
+    result = decide_stateful_static_frame(
+        frame_bgr=raw_frame,
+        level=level,
+        launcher_templates=template_set,
+        state=CommandOutcomeState(
+            action_tracker=ActionTrackerState(
+                deadzones=(Deadzone(point=Point(x=100.0, y=105.0), expires_at=12.0),)
+            )
+        ),
+        current_time=10.0,
+        params=StatefulStaticFrameDecisionParams(
+            frame_decision=StaticFrameDecisionParams(
+                fallback_discard=DiscardParams(enabled=False),
+                target_scoring=TargetScoringParams(soft_lock_radius=35.0),
+            )
+        ),
+    )
+
+    assert result.decision.current_candidates == ()
+    assert result.decision.screen_command.command_type == CommandType.NO_OP
+
+
+def test_decide_stateful_static_frame_updates_outcome_after_shoot(monkeypatch):
+    raw_frame = np.zeros((30, 30, 3), dtype=np.uint8)
+    roi_frame = np.full((20, 20, 3), 9, dtype=np.uint8)
+    level = _level()
+    template_set = LauncherTemplateSet(search_radius=5, step_degrees=5, templates={})
+
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.extract_game_roi",
+        lambda frame_bgr, level: GameRoiResult(
+            frame=roi_frame,
+            offset=Point(x=10, y=20),
+            confidence=1.0,
+        ),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.detect_static_world_state_from_roi",
+        lambda **kwargs: _world_state(current_color="red"),
+    )
+
+    result = decide_stateful_static_frame(
+        frame_bgr=raw_frame,
+        level=level,
+        launcher_templates=template_set,
+        state=CommandOutcomeState(),
+        current_time=10.0,
+        params=StatefulStaticFrameDecisionParams(
+            outcome=CommandOutcomeParams(fire_cooldown=0.4)
+        ),
+    )
+
+    assert result.decision.screen_command.command_type == CommandType.SHOOT
+    assert result.state.last_fire_time == 10.0
+    assert result.state.next_fire_ready_time == 10.4
+    assert result.state.action_tracker.deadzones
 
 
 def _level() -> LevelRuntimeAssets:
