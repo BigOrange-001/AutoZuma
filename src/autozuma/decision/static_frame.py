@@ -7,8 +7,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from autozuma.control.commands import map_command_to_screen
-from autozuma.core.models import Command, LevelRuntimeAssets, LauncherTemplateSet
+from autozuma.core.models import Command, LevelRuntimeAssets, LauncherTemplateSet, Point
 from autozuma.strategy.commands import command_for_selected_target
+from autozuma.strategy.coins import CoinScoringParams, score_coin_targets_for_color
 from autozuma.strategy.discard import DiscardParams, discard_target
 from autozuma.strategy.prediction import TargetPredictionParams, predict_targets
 from autozuma.strategy.selection import TargetSelectionParams, select_best_clear_target
@@ -30,6 +31,8 @@ class StaticFrameDecisionParams:
     target_swap: SwapDecisionParams = SwapDecisionParams()
     target_prediction: TargetPredictionParams = TargetPredictionParams()
     target_selection: TargetSelectionParams = TargetSelectionParams()
+    coin_scoring: CoinScoringParams = CoinScoringParams()
+    active_coins: tuple[Point, ...] = ()
     fallback_discard: DiscardParams = DiscardParams()
     p_start_exclude: float = 0.0
     p_end_exclude: float = 0.0
@@ -54,12 +57,24 @@ def decide_static_frame_command(
         world_state=world_state,
         level=level,
         params=params.target_scoring,
+    ) + score_coin_targets_for_color(
+        world_state=world_state,
+        level=level,
+        active_coins=params.active_coins,
+        target_color=world_state.launcher.current_ball,
+        params=params.coin_scoring,
     )
     next_candidates = score_basic_targets_for_color(
         world_state=world_state,
         level=level,
         target_color=world_state.launcher.next_ball,
         params=params.target_scoring,
+    ) + score_coin_targets_for_color(
+        world_state=world_state,
+        level=level,
+        active_coins=params.active_coins,
+        target_color=world_state.launcher.next_ball,
+        params=params.coin_scoring,
     )
     swap_decision = choose_swap_candidates(
         current_candidates=candidates,

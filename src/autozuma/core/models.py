@@ -175,6 +175,9 @@ class TargetCandidate:
     track_idx: int | None = None
     cluster_start_idx: int | None = None
     cluster_end_idx: int | None = None
+    secondary_x: float | None = None
+    secondary_y: float | None = None
+    delay_ms: int = 0
 
 
 class CommandType(Enum):

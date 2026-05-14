@@ -18,6 +18,7 @@ from autozuma.core.models import (
     WorldState,
 )
 from autozuma.decision.static_frame import StaticFrameDecisionParams, decide_static_frame_command
+from autozuma.strategy.coins import CoinScoringParams
 from autozuma.strategy.discard import DiscardParams
 from autozuma.strategy.prediction import TargetPredictionParams
 from autozuma.strategy.selection import TargetSelectionParams
@@ -197,6 +198,90 @@ def test_decide_static_frame_command_returns_swap_shoot_for_better_next_target(m
     assert command.secondary_target is None
 
 
+def test_decide_static_frame_command_maps_double_shoot_targets_to_screen(monkeypatch):
+    raw_frame = np.zeros((30, 30, 3), dtype=np.uint8)
+    roi_frame = np.full((20, 20, 3), 9, dtype=np.uint8)
+    level = _level()
+    template_set = LauncherTemplateSet(search_radius=5, step_degrees=5, templates={})
+    roi_result = GameRoiResult(frame=roi_frame, offset=Point(x=10, y=20), confidence=1.0)
+    target = TargetCandidate(
+        x=3.0,
+        y=4.0,
+        score=100.0,
+        target_type="breakthrough_coin",
+        secondary_x=13.0,
+        secondary_y=14.0,
+        delay_ms=250,
+    )
+
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.extract_game_roi",
+        lambda frame_bgr, level: roi_result,
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.detect_static_world_state_from_roi",
+        lambda **kwargs: _world_state(current_color="red"),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.score_basic_targets",
+        lambda **kwargs: (target,),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.score_basic_targets_for_color",
+        lambda **kwargs: (),
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.select_best_clear_target",
+        lambda world_state, candidates, frog_pivot, params: tuple(candidates)[0],
+    )
+
+    command = decide_static_frame_command(
+        frame_bgr=raw_frame,
+        level=level,
+        launcher_templates=template_set,
+    )
+
+    assert command.command_type == CommandType.DOUBLE_SHOOT
+    assert command.primary_target == Point(x=13.0, y=24.0)
+    assert command.secondary_target == Point(x=23.0, y=34.0)
+    assert command.delay_ms == 250
+
+
+def test_decide_static_frame_command_scores_active_breakthrough_coin(monkeypatch):
+    raw_frame = np.zeros((30, 30, 3), dtype=np.uint8)
+    roi_frame = np.full((20, 20, 3), 9, dtype=np.uint8)
+    level = _level()
+    template_set = LauncherTemplateSet(search_radius=5, step_degrees=5, templates={})
+    roi_result = GameRoiResult(frame=roi_frame, offset=Point(x=10, y=20), confidence=1.0)
+
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.extract_game_roi",
+        lambda frame_bgr, level: roi_result,
+    )
+    monkeypatch.setattr(
+        "autozuma.decision.static_frame.detect_static_world_state_from_roi",
+        lambda **kwargs: _world_state(current_color="red"),
+    )
+
+    command = decide_static_frame_command(
+        frame_bgr=raw_frame,
+        level=level,
+        launcher_templates=template_set,
+        params=StaticFrameDecisionParams(
+            coin_scoring=CoinScoringParams(
+                coin_priority=100000.0,
+                breakthrough_delay_ms=250,
+            ),
+            active_coins=(Point(x=100.0, y=150.0),),
+        ),
+    )
+
+    assert command.command_type == CommandType.DOUBLE_SHOOT
+    assert command.primary_target == Point(x=110.0, y=145.0)
+    assert command.secondary_target == Point(x=110.0, y=170.0)
+    assert command.delay_ms == 250
+
+
 def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
     raw_frame = np.zeros((30, 30, 3), dtype=np.uint8)
     roi_frame = np.full((20, 20, 3), 9, dtype=np.uint8)
@@ -206,6 +291,8 @@ def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
     swap_params = SwapDecisionParams(swap_score_ratio=1.5)
     prediction_params = TargetPredictionParams(predict_multiplier=0.25)
     selection_params = TargetSelectionParams(min_gap=44.0)
+    coin_params = CoinScoringParams(coin_priority=777.0)
+    active_coins = (Point(x=1.0, y=2.0),)
     calls = {}
 
     monkeypatch.setattr(
@@ -228,6 +315,16 @@ def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
     def fake_predict_targets(targets, level, frog_pivot, params):
         calls["predict"] = params
         return targets
+
+    def fake_score_coin_targets_for_color(
+        world_state,
+        level,
+        active_coins,
+        target_color,
+        params,
+    ):
+        calls.setdefault("coins", []).append((active_coins, target_color, params))
+        return ()
 
     def fake_choose_swap_candidates(
         current_candidates,
@@ -256,6 +353,10 @@ def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
         fake_predict_targets,
     )
     monkeypatch.setattr(
+        "autozuma.decision.static_frame.score_coin_targets_for_color",
+        fake_score_coin_targets_for_color,
+    )
+    monkeypatch.setattr(
         "autozuma.decision.static_frame.choose_swap_candidates",
         fake_choose_swap_candidates,
     )
@@ -273,10 +374,16 @@ def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
             target_swap=swap_params,
             target_prediction=prediction_params,
             target_selection=selection_params,
+            coin_scoring=coin_params,
+            active_coins=active_coins,
         ),
     )
 
     assert calls["score"] == scoring_params
+    assert calls["coins"] == [
+        (active_coins, "red", coin_params),
+        (active_coins, "yellow", coin_params),
+    ]
     assert calls["swap"] == swap_params
     assert calls["predict"] == prediction_params
     assert calls["select"] == selection_params

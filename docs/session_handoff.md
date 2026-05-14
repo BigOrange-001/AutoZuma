@@ -32,8 +32,10 @@ The current refactor has completed the foundation layers:
 - Pure target-coordinate prediction along dense track geometry.
 - Pure swap decision based on current-ball versus next-ball target scores.
 - Pure fallback discard target selection.
+- Pure command variants for `DOUBLE_SHOOT` and `SWAP_DOUBLE_SHOOT`.
+- Pure coin target scoring for direct and breakthrough coin shots.
 
-No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, swap cooldown/execution, runtime cooldowns, or command execution has been done yet.
+No live game automation, mouse execution, GUI, frame capture, UI state handling, full strategy migration, active coin detection/tracking, swap cooldown/execution, runtime cooldowns, or command execution has been done yet.
 
 ## Important Paths
 
@@ -66,7 +68,7 @@ Current model groups:
 - Launcher template models: `LauncherTemplate`, `LauncherTemplateSet`
 - Future gameplay skeletons: `BallEntity`, `Cluster`, `LauncherState`, `WorldState`, `TargetCandidate`, `Command`
 
-`TargetCandidate` now includes optional combo depth and topology context fields for track id, target track index, and cluster start/end indices.
+`TargetCandidate` now includes optional combo depth, topology context fields for track id, target track index, and cluster start/end indices, plus optional secondary target coordinates and delay metadata for double-shot command variants.
 
 ### Asset Loading And Validation
 
@@ -205,7 +207,8 @@ Behavior:
 - Keeps scoring pure and stateless with explicit `TargetScoringParams`.
 - Uses distance, shot/track orthogonality, local straightness, and bad-geometry penalty terms from the prototype baseline.
 - Preserves prototype combo-depth scanning, rollback classification, same-color adjacent-cluster skipping, and nearby deeper-combo downgrade behavior.
-- Does not yet handle coins, line-of-sight, locks, or command generation.
+- Coin target scoring is handled separately in `src/autozuma/strategy/coins.py`.
+- Does not yet handle line-of-sight selection, locks, or command generation directly.
 
 ### Strategy Line-Of-Sight
 
@@ -242,6 +245,7 @@ Behavior:
 - Clamps predicted indices to dense track bounds.
 - Replaces target coordinates with the predicted dense track point and updates `track_idx` for downstream line-of-sight filtering.
 - Leaves targets without topology metadata unchanged.
+- Leaves double-shot targets unchanged so breakthrough coin aim points are not re-predicted.
 - Does not compute travel time, update virtual balls, enforce cooldowns, perform swaps, or execute commands.
 
 ### Strategy Swap Decision
@@ -269,6 +273,21 @@ Behavior:
 - Emits normal `SHOOT` through the static-frame decision pipeline.
 - Does not handle fire cooldown, mouse execution, action tracker, virtual balls, or locks.
 
+### Strategy Coin Target Scoring
+
+File: `src/autozuma/strategy/coins.py`
+
+Behavior:
+
+- Scores explicitly supplied active coin points; it does not detect or track active coins.
+- Preserves prototype direct coin scoring when coin line of sight is clear: `direct_coin` with `coin_priority * 2.0`.
+- Preserves prototype breakthrough scoring when exactly one blocking cluster matches the evaluated ball color and has size at least 2: `breakthrough_coin` with `coin_priority * 1.5`.
+- Preserves prototype breakthrough aim offset: center entity track index `+15`, clamped to the dense track.
+- Preserves prototype breakthrough double-shot delay default: `250 ms`.
+- Adds secondary target metadata to breakthrough coin targets so command generation emits `DOUBLE_SHOOT` or `SWAP_DOUBLE_SHOOT`.
+- Supports scoring current-ball and next-ball coin targets before the existing pure swap decision.
+- Keeps the slice pure and stateless: no coin lifetime tracking, coin locks, frame differencing, cooldowns, action tracker, or mouse execution.
+
 ### Basic Strategy Command Generation
 
 File: `src/autozuma/strategy/commands.py`
@@ -277,8 +296,12 @@ Behavior:
 
 - Converts a selected `TargetCandidate` into a `CommandType.SHOOT` command at the ROI-local target point.
 - Converts a selected swapped target into `CommandType.SWAP_SHOOT`.
+- Converts selected targets with complete secondary target metadata into `CommandType.DOUBLE_SHOOT`.
+- Converts swapped selected targets with complete secondary target metadata into `CommandType.SWAP_DOUBLE_SHOOT`.
+- Carries target-specific double-shot delays in `Command.delay_ms`.
 - Converts missing target selection into `CommandType.NO_OP`.
-- Does not yet handle ROI-to-screen offsets, double shots, cooldowns, locks, or mouse execution.
+- Rejects incomplete secondary target metadata.
+- Does not yet handle cooldowns, locks, or mouse execution.
 
 ### ROI-To-Screen Command Mapping
 
@@ -300,9 +323,11 @@ Behavior:
 
 - Accepts a raw BGR frame, `LevelRuntimeAssets`, `LauncherTemplateSet`, and `StaticFrameDecisionParams`.
 - Extracts the static ROI once, detects world state from that ROI, scores basic targets, selects the best clear target, generates a ROI-local command, and maps it back to screen-frame coordinates.
-- Scores both current-ball and next-ball targets and applies pure swap decision before prediction.
+- Scores both current-ball and next-ball basic/coin targets and applies pure swap decision before prediction.
+- Accepts explicit `active_coins` in `StaticFrameDecisionParams`; active coin detection/tracking is not part of this pipeline yet.
 - Applies pure target prediction between scoring and line-of-sight selection.
 - Returns a screen-frame `Command`.
+- Preserves and maps secondary targets for double-shot command variants.
 - Returns fallback `CommandType.SHOOT` when no target is selected but discard is available.
 - Returns `CommandType.NO_OP` when no target is selected and discard is disabled or unavailable.
 - Remains pure and single-frame: no live capture, mouse execution, cooldowns, locks, or UI handling.
@@ -330,23 +355,26 @@ Run from `AutoZumaNext/`:
 .\.venv\Scripts\python -m autozuma.cli.validate_assets
 ```
 
-Last known results:
+Last known full-suite results:
 
-- `pytest`: 98 passed
+- `pytest`: 112 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
+Last targeted coin-scoring check:
+
+- `.venv\Scripts\python -m pytest tests\test_strategy_coins.py tests\test_strategy_prediction.py tests\test_strategy_commands.py tests\test_static_frame_decision.py`: 27 passed
+
 ## Next Recommended Step
 
-The next clean step is to migrate another pure strategy decision slice.
+The next clean step is to migrate active coin detection/tracking as an explicit, testable state slice.
 
 Suggested scope:
 
-- Keep it pure and single-frame.
-- Add one behavior slice at a time, with tests: command variants or coin targets are reasonable candidates.
+- Keep frame differencing and lifetime/lock bookkeeping separate where practical.
+- Preserve prototype thresholds: treasure-point ROI radius `12`, diff threshold `40`, active pixel count `>55`, active lifetime `0.5..7.0s`, stale timeout `0.4s`, lock radius `15`.
+- Feed the resulting active coin points into the existing `StaticFrameDecisionParams.active_coins` path.
 - Do not add live capture, mouse execution, GUI, runtime cooldowns, or UI handling in the same step unless there is a specific reason.
-
-Command variants are likely the cleanest next step because `DOUBLE_SHOOT` and `SWAP_DOUBLE_SHOOT` can be represented in existing `Command` fields before adding runtime mouse execution.
 
 ## Design Rules To Preserve
 

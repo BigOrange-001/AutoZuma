@@ -79,6 +79,30 @@ def test_predict_target_leaves_target_without_topology_metadata_unchanged():
     assert predicted == target
 
 
+def test_predict_target_leaves_double_shot_target_unchanged():
+    level = _level()
+    target = TargetCandidate(
+        x=30,
+        y=40,
+        score=12.0,
+        target_type="breakthrough_coin",
+        track_id=0,
+        track_idx=10,
+        secondary_x=100.0,
+        secondary_y=100.0,
+        delay_ms=250,
+    )
+
+    predicted = predict_target(
+        target=target,
+        level=level,
+        frog_pivot=Point(x=0, y=0),
+        params=TargetPredictionParams(predict_multiplier=0.2),
+    )
+
+    assert predicted == target
+
+
 def test_predict_targets_preserves_order():
     level = _level()
     targets = (

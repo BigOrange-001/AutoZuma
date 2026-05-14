@@ -41,6 +41,8 @@ def predict_target(
     params: TargetPredictionParams = TargetPredictionParams(),
 ) -> TargetCandidate:
     """Project a target forward along its track according to launcher distance."""
+    if target.secondary_x is not None or target.secondary_y is not None:
+        return target
     if target.track_id is None or target.track_idx is None:
         return target
 

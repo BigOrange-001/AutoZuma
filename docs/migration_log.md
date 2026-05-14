@@ -1,5 +1,66 @@
 # Migration Log
 
+## 2026-05-14
+
+### Strategy Command Variants Baseline
+
+Migrated the pure command-object representation for prototype double-shot command variants.
+
+Added:
+
+- Secondary target and delay metadata on `TargetCandidate`.
+- `DOUBLE_SHOOT` and `SWAP_DOUBLE_SHOOT` generation in `src/autozuma/strategy/commands.py`.
+- Command variant tests in `tests/test_strategy_commands.py`.
+- Static-frame command mapping coverage in `tests/test_static_frame_decision.py`.
+
+Behavior:
+
+- A selected target without a secondary target still emits `SHOOT` or `SWAP_SHOOT`.
+- A selected target with both `secondary_x` and `secondary_y` emits `DOUBLE_SHOOT`.
+- A swapped selected target with a secondary target emits `SWAP_DOUBLE_SHOOT`.
+- Double-shot commands carry the target-specific inter-shot delay in milliseconds.
+- Incomplete secondary target metadata is rejected instead of producing a partial command.
+- The static-frame decision pipeline maps both primary and secondary ROI-local targets into screen-frame coordinates.
+- Keeps command generation pure and stateless: no mouse execution, swap cooldown, coin tracking, runtime locks, or UI handling.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_strategy_commands.py tests\test_control_commands.py tests\test_static_frame_decision.py` passed: 15 tests.
+- `.venv\Scripts\python -m pytest` passed: 102 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
+### Strategy Coin Target Scoring Baseline
+
+Migrated the pure coin target-scoring portion of the prototype strategy loop.
+
+Added:
+
+- `src/autozuma/strategy/coins.py`.
+- `CoinScoringParams` on `StaticFrameDecisionParams`.
+- Explicit `active_coins` input on `StaticFrameDecisionParams`.
+- Coin scoring tests in `tests/test_strategy_coins.py`.
+- Static-frame active coin coverage in `tests/test_static_frame_decision.py`.
+
+Behavior:
+
+- Scores already-detected active coin points without owning coin tracking state.
+- Preserves prototype direct coin scoring: clear coin line of sight emits `direct_coin` with `coin_priority * 2.0`.
+- Preserves prototype breakthrough coin scoring: exactly one blocking same-color cluster with size at least 2 emits `breakthrough_coin` with `coin_priority * 1.5`.
+- Uses the prototype breakthrough aim offset of `+15` dense track indices.
+- Uses the prototype breakthrough double-shot delay default of `250 ms`.
+- Breakthrough coin targets carry secondary target metadata so command generation emits `DOUBLE_SHOOT` or `SWAP_DOUBLE_SHOOT`.
+- Current-ball and next-ball coin candidates are both scored before the existing pure swap decision.
+- Prediction leaves double-shot targets unchanged so breakthrough aim points are not moved a second time.
+- Keeps the slice pure and single-frame: no live capture, coin lifetime tracking, coin locks, mouse execution, runtime cooldowns, or action locks.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_strategy_coins.py tests\test_strategy_prediction.py tests\test_strategy_commands.py tests\test_static_frame_decision.py` passed: 27 tests.
+- `.venv\Scripts\python -m pytest` passed: 112 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected `space` special-detection note.
+
 ## 2026-05-13
 
 ### Asset Migration Baseline
