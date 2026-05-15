@@ -2,6 +2,49 @@
 
 ## 2026-05-14
 
+### Static Live CLI And INI Config Baseline
+
+Migrated the first CLI/app entry point and prototype-style INI configuration
+loading for the static live loop.
+
+Added:
+
+- `src/autozuma/runtime/config.py`.
+- `src/autozuma/cli/live_static.py`.
+- Bundled `config/strategy_v1_plus.ini`.
+- `autozuma-live-static` project script.
+- Runtime config tests in `tests/test_runtime_config.py`.
+- Static live CLI tests in `tests/test_cli_live_static.py`.
+
+Behavior:
+
+- Loads prototype-compatible `[STRATEGY]` numeric INI values into a normalized
+  lower-case raw-value mapping.
+- Provides `DEFAULT_RUNTIME_VALUES` matching the migrated prototype strategy
+  config.
+- Merges defaults, optional explicit INI path, and CLI `--set KEY=VALUE`
+  overrides.
+- Rejects missing explicit INI paths and non-numeric config/override values.
+- Adds `python -m autozuma.cli.live_static` and `autozuma-live-static`.
+- CLI builds `LiveLoopParams` for the existing static live loop.
+- CLI supports `--dry-run/--no-dry-run`, `--virtual-mouse/--no-virtual-mouse`,
+  `--window-title`, `--fps`, `--max-iterations`, map redetection interval,
+  level confidence, config path, and runtime parameter overrides.
+- Default CLI mode is dry-run, so it can load assets and loop params without
+  executing mouse input unless explicitly enabled.
+- Keeps GUI controls, debug evidence output, UI-state detection, dynamic
+  `space` handling, and multi-process orchestration outside this slice.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_config.py tests\test_cli_live_static.py tests\test_runtime_loop.py` passed: 15 tests.
+- `.venv\Scripts\python -m pytest` passed: 211 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+- `.venv\Scripts\python -m autozuma.cli.live_static --max-iterations 0 --dry-run`
+  passed and exited without capture or mouse execution.
+
 ### Live Loop And Hotkey Control Baseline
 
 Migrated the first long-running loop scaffold and F-key control boundary around

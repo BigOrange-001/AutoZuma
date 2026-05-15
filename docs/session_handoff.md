@@ -48,8 +48,9 @@ The current refactor has completed the foundation layers:
 - Host-facing static runtime adapter that converts pure single-frame runtime commands into execution plans and optionally dispatches them through a driver.
 - Static session shell for detecting static levels, initializing/resetting runtime state, periodic map redetection, and live one-frame capture/dispatch.
 - Long-running live loop scaffold with injectable clock/hotkey reader and F1/F2/F3 edge-triggered control.
+- Prototype-compatible INI config loading and static live CLI entry point with dry-run support.
 
-No GUI, UI state handling, INI/GUI parameter loading, dynamic-background `space` handling, debug evidence output, or multi-process/shared-memory orchestration has been done yet. A static live loop scaffold now exists, but it has not been packaged into a user-facing CLI/app entry point.
+No GUI, UI state handling, dynamic-background `space` handling, debug evidence output, or multi-process/shared-memory orchestration has been done yet. A static live CLI exists and defaults to dry-run mode unless command execution is explicitly enabled.
 
 ## Important Paths
 
@@ -590,6 +591,32 @@ Behavior:
 - Supports dry-run command behavior through existing nested `execute_commands=False` host params.
 - Does not yet own debug snapshot rendering, GUI controls, process orchestration, or UI-state handling.
 
+### Runtime Config Loading
+
+File: `src/autozuma/runtime/config.py`
+
+Behavior:
+
+- Provides `DEFAULT_RUNTIME_VALUES` aligned with the migrated prototype `strategy_v1_plus.ini`.
+- Loads prototype-compatible `[STRATEGY]` INI files into lower-case float mappings.
+- Merges defaults, optional INI values, and CLI-style overrides.
+- Parses repeated `KEY=VALUE` override strings for command-line use.
+- Rejects missing explicit config paths and non-numeric values.
+- Feeds the existing runtime strategy adapter; it does not own GUI widgets or live shared state.
+
+### Static Live CLI
+
+File: `src/autozuma/cli/live_static.py`
+
+Behavior:
+
+- Exposes `python -m autozuma.cli.live_static` and project script `autozuma-live-static`.
+- Loads runtime values, builds `LiveLoopParams`, loads live context, and runs `run_live_loop()`.
+- Defaults to `--dry-run`, so command plans are generated without mouse input unless `--no-dry-run` is passed.
+- Supports `--config`, repeated `--set KEY=VALUE`, `--window-title`, `--fps`, `--max-iterations`, `--virtual-mouse/--no-virtual-mouse`, map redetection interval, and static level confidence.
+- Uses config `virtual_mouse` when the CLI does not explicitly override virtual mouse mode.
+- Does not yet implement GUI controls, debug output, UI-state handling, `space`, or process orchestration.
+
 ## Migrated Assets
 
 Current asset counts:
@@ -615,9 +642,13 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 202 passed
+- `pytest`: 211 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
+
+Last static live CLI smoke check:
+
+- `.venv\Scripts\python -m autozuma.cli.live_static --max-iterations 0 --dry-run`: passed
 
 Last targeted live-loop check:
 
@@ -642,13 +673,14 @@ Last targeted static-runtime check:
 
 ## Next Recommended Step
 
-The next clean step is to add a small CLI/app entry point for the static live loop.
+The next clean step is to migrate debug evidence output behind the existing live-loop events and rich decision results.
 
 Suggested scope:
 
-- Add a CLI command that loads `LiveStaticSessionContext`, builds params from defaults/raw config, and runs `run_live_loop()`.
-- Include a dry-run flag that forces `execute_commands=False` for initial live verification.
-- Keep GUI panel, UI-state detection, dynamic-background `space` handling, debug evidence output, and multi-process/shared-memory orchestration outside this immediate slice unless the next session intentionally chooses one of those instead.
+- Handle F2 `debug_requested` events without coupling screenshot writing to strategy logic.
+- Save current captured frame or session/decision evidence through a small debug output adapter.
+- Consider a replay/debug renderer that consumes `StaticFrameDecisionResult` rather than reading live globals.
+- Keep GUI panel, UI-state detection, dynamic-background `space` handling, and multi-process/shared-memory orchestration outside this immediate slice unless the next session intentionally chooses one of those instead.
 
 ## Design Rules To Preserve
 
