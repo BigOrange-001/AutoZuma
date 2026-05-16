@@ -5,6 +5,8 @@ import numpy as np
 
 from autozuma.core.models import (
     AssetRegistry,
+    Command,
+    CommandType,
     ImageAsset,
     LauncherTemplateSet,
     LevelDetectionResult,
@@ -14,6 +16,7 @@ from autozuma.core.models import (
     Point,
     TemplateAssets,
 )
+from autozuma.runtime.ui import UiAutomationFrameResult, UiAutomationState
 from autozuma.runtime.host import StaticHostFrameParams
 from autozuma.runtime.session import (
     StaticSessionParams,
@@ -209,11 +212,85 @@ def test_playing_state_refreshes_detection_time_when_same_level_is_seen(monkeypa
     assert result.level_changed is False
 
 
-def _params() -> StaticSessionParams:
+def test_ui_click_skips_gameplay_and_uses_ui_execution_plan(monkeypatch):
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    driver = _Driver()
+    ui_state = UiAutomationState(last_poll_time=12.0, click_count=4, next_click_time=13.0)
+
+    monkeypatch.setattr(
+        "autozuma.runtime.session.run_ui_automation_frame",
+        lambda **kwargs: UiAutomationFrameResult(
+            state=ui_state,
+            command=Command(CommandType.UI_CLICK, primary_target=Point(x=5, y=6)),
+            should_skip_gameplay=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "autozuma.runtime.session.detect_static_level",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("level detection should not run")),
+    )
+    monkeypatch.setattr(
+        "autozuma.runtime.session.run_static_host_frame",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("host should not run")),
+    )
+
+    result = run_static_session_frame(
+        frame_bgr=frame,
+        registry=_registry("spiral"),
+        launcher_templates=_launcher_templates(),
+        state=StaticSessionState(
+            phase=StaticSessionPhase.PLAYING,
+            level_id="spiral",
+            runtime_state=initial_static_runtime_state(1.0),
+        ),
+        current_time=13.0,
+        params=_params(execute_commands=True),
+        driver=driver,
+    )
+
+    assert result.host_result is None
+    assert result.ui_result is not None
+    assert result.ui_result.execution_plan.steps[0].target == Point(x=5, y=6)
+    assert result.state.ui_state == ui_state
+    assert driver.calls == [("ui_click", Point(x=5, y=6))]
+
+
+def test_ui_automation_reset_returns_to_detecting_without_gameplay(monkeypatch):
+    monkeypatch.setattr(
+        "autozuma.runtime.session.run_ui_automation_frame",
+        lambda **kwargs: UiAutomationFrameResult(
+            state=UiAutomationState(last_poll_time=12.0),
+            should_skip_gameplay=True,
+            reset_session=True,
+        ),
+    )
+
+    result = run_static_session_frame(
+        frame_bgr=np.zeros((10, 10, 3), dtype=np.uint8),
+        registry=_registry("spiral"),
+        launcher_templates=_launcher_templates(),
+        state=StaticSessionState(
+            phase=StaticSessionPhase.PLAYING,
+            level_id="spiral",
+            runtime_state=initial_static_runtime_state(1.0),
+        ),
+        current_time=13.0,
+        params=_params(),
+        driver=_Driver(),
+    )
+
+    assert result.state.phase == StaticSessionPhase.DETECTING
+    assert result.state.level_id is None
+    assert result.state.runtime_state is None
+    assert result.state.ui_state.last_poll_time == 12.0
+    assert result.host_result is None
+
+
+def _params(execute_commands=False) -> StaticSessionParams:
     return StaticSessionParams(
         host=StaticHostFrameParams(
             runtime=StaticRuntimeFrameParams(raw_values={}),
-            execute_commands=False,
+            execute_commands=execute_commands,
         )
     )
 
@@ -248,14 +325,17 @@ def _launcher_templates() -> LauncherTemplateSet:
 
 
 class _Driver:
+    def __init__(self):
+        self.calls = []
+
     def left_click(self, target):
-        pass
+        self.calls.append(("left_click", target))
 
     def ui_click(self, target):
-        pass
+        self.calls.append(("ui_click", target))
 
     def right_click(self):
-        pass
+        self.calls.append(("right_click", None))
 
     def wait(self, delay_ms):
-        pass
+        self.calls.append(("wait", delay_ms))

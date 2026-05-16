@@ -1,5 +1,102 @@
 # Migration Log
 
+## 2026-05-16
+
+### UI Detection And Click Handling Baseline
+
+Migrated prototype UI button detection and repeated click handling behind the
+static session boundary.
+
+Added:
+
+- `src/autozuma/runtime/ui.py`.
+- `UiDetectionResult`, `UiAutomationState`, `UiAutomationParams`, and
+  `UiAutomationFrameResult`.
+- `StaticSessionUiResult` on static session results.
+- UI automation tests in `tests/test_runtime_ui.py`.
+- Static session tests for UI click planning, execution, gameplay skip, and
+  post-burst session reset.
+
+Behavior:
+
+- Detects UI buttons from the full captured frame using grayscale
+  `cv2.TM_CCOEFF_NORMED` template matching.
+- Preserves the prototype strict UI threshold: confidence must be greater than
+  `0.75`.
+- Checks configured templates in registry order; the migrated registry currently
+  checks `ok` before `continue`.
+- Preserves the prototype poll interval of `1.0s`.
+- When UI is detected and no burst is active, schedules `5` click attempts with
+  the first click due immediately.
+- Before each attempt, re-detects the button and emits `CommandType.UI_CLICK` at
+  the detected button center when present.
+- Preserves prototype retry timing: next attempt is `1.0s` after a successful
+  UI click and `0.1s` after a missed re-detection.
+- While a UI burst is active, the session skips level detection and gameplay
+  strategy for that frame.
+- After the burst completes, the static session resets to detecting while keeping
+  UI automation timing state explicit.
+- UI click commands are converted through the existing execution-plan path and
+  dispatched through `driver.ui_click()` only when command execution is enabled.
+- Debug summaries now include UI automation state, detection, command, skip/reset
+  flags, and UI execution plan evidence.
+- Keeps GUI controls, dynamic-background `space`, and multi-process/shared-memory
+  orchestration outside this slice.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_ui.py tests\test_runtime_session.py tests\test_runtime_debug.py tests\test_runtime_loop.py tests\test_runtime_live.py tests\test_cli_live_static.py` passed: 27 tests.
+- `.venv\Scripts\python -m pytest` passed: 222 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+- `.venv\Scripts\python -m autozuma.cli.live_static --max-iterations 0 --dry-run`
+  passed and exited without capture or mouse execution.
+
+### Debug Evidence Output Baseline
+
+Migrated F2-triggered debug evidence output behind the live-loop event and
+single-frame live adapter boundaries.
+
+Added:
+
+- `src/autozuma/runtime/debug.py`.
+- `DebugOutputSink` protocol and `FileDebugOutputSink`.
+- Debug evidence tests in `tests/test_runtime_debug.py`.
+- Live-loop and live-adapter coverage for F2 debug output wiring.
+- `--debug-dir` CLI option for static live sessions.
+
+Behavior:
+
+- F2 remains an edge-triggered hotkey event from `poll_hotkeys()`.
+- `run_live_loop_iteration()` passes the configured debug sink to the live frame
+  adapter only when F2 is requested while the loop is armed.
+- `run_live_static_session_frame()` invokes the sink after capture and session
+  processing, where both the raw captured frame and rich session result are
+  available.
+- `FileDebugOutputSink` writes a unique snapshot directory containing:
+  - `frame.png` for the raw captured frame.
+  - `summary.json` with session, detection, runtime, decision, command, and
+    execution-plan evidence.
+  - `roi.png` and `roi_overlay.png` when a host decision exists.
+- The overlay renderer consumes `StaticFrameDecisionResult` and draws detected
+  entities, the selected target, secondary target, and launcher next-ball marker
+  without reading mutable live globals.
+- Keeps perception, strategy, decision, command planning, and Win32 execution
+  free of debug-file side effects.
+- Keeps GUI controls, UI-state detection, dynamic-background `space`, and
+  multi-process/shared-memory orchestration outside this slice.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_debug.py tests\test_runtime_loop.py tests\test_runtime_live.py tests\test_cli_live_static.py` passed: 15 tests.
+- `.venv\Scripts\python -m pytest` passed: 216 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+- `.venv\Scripts\python -m autozuma.cli.live_static --max-iterations 0 --dry-run`
+  passed and exited without capture or mouse execution.
+
 ## 2026-05-14
 
 ### Static Live CLI And INI Config Baseline

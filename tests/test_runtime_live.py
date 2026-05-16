@@ -68,6 +68,49 @@ def test_run_live_static_session_frame_captures_window_and_runs_session(monkeypa
     assert isinstance(calls["session"]["driver"], FakeExecutor)
 
 
+def test_run_live_static_session_frame_writes_requested_debug_output(monkeypatch):
+    context = LiveStaticSessionContext(registry=object(), launcher_templates=object())
+    state = object()
+    frame = object()
+    session_result = object()
+    rect = WindowRect(left=1, top=2, width=3, height=4)
+    calls = {}
+
+    monkeypatch.setattr("autozuma.runtime.live.find_game_window", lambda title: (99, rect))
+    monkeypatch.setattr("autozuma.runtime.live.capture_window_frame", lambda capture_rect: frame)
+    monkeypatch.setattr("autozuma.runtime.live.Win32CommandExecutor", lambda **kwargs: object())
+    monkeypatch.setattr(
+        "autozuma.runtime.live.run_static_session_frame",
+        lambda **kwargs: session_result,
+    )
+
+    class DebugOutput:
+        def write(self, **kwargs):
+            calls["debug"] = kwargs
+
+    params = LiveStaticSessionParams(
+        session=StaticSessionParams(
+            host=StaticHostFrameParams(runtime=StaticRuntimeFrameParams(raw_values={}))
+        ),
+        window_title="zuma deluxe",
+    )
+
+    result = run_live_static_session_frame(
+        context=context,
+        state=state,
+        current_time=10.0,
+        params=params,
+        debug_output=DebugOutput(),
+    )
+
+    assert result is session_result
+    assert calls["debug"] == {
+        "frame_bgr": frame,
+        "session_result": session_result,
+        "current_time": 10.0,
+    }
+
+
 def test_build_live_static_session_context_loads_registry_and_templates(monkeypatch):
     registry = SimpleNamespace(templates=SimpleNamespace(launcher_frog=object()))
     template_set = object()

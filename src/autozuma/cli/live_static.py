@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from autozuma.runtime.config import load_runtime_values, parse_runtime_overrides
+from autozuma.runtime.debug import FileDebugOutputSink
 from autozuma.runtime.host import StaticHostFrameParams
 from autozuma.runtime.live import LiveStaticSessionParams, build_live_static_session_context
 from autozuma.runtime.loop import LiveLoopParams, run_live_loop
@@ -56,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.25,
         help="Minimum static level recognition confidence.",
     )
+    parser.add_argument(
+        "--debug-dir",
+        type=Path,
+        default=Path("debug"),
+        help="Directory for F2 debug snapshots.",
+    )
     return parser
 
 
@@ -82,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         fps=args.fps,
         map_redetect_interval=args.map_redetect_interval,
         level_min_confidence=args.level_min_confidence,
+        debug_dir=args.debug_dir,
     )
 
     context = build_live_static_session_context()
@@ -105,6 +113,7 @@ def _build_loop_params(
     fps: float,
     map_redetect_interval: float,
     level_min_confidence: float,
+    debug_dir: Path | None,
 ) -> LiveLoopParams:
     return LiveLoopParams(
         live=LiveStaticSessionParams(
@@ -120,6 +129,7 @@ def _build_loop_params(
             use_virtual_mouse=use_virtual_mouse,
         ),
         target_fps=fps,
+        debug_output=None if debug_dir is None else FileDebugOutputSink(debug_dir),
     )
 
 

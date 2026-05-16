@@ -49,8 +49,10 @@ The current refactor has completed the foundation layers:
 - Static session shell for detecting static levels, initializing/resetting runtime state, periodic map redetection, and live one-frame capture/dispatch.
 - Long-running live loop scaffold with injectable clock/hotkey reader and F1/F2/F3 edge-triggered control.
 - Prototype-compatible INI config loading and static live CLI entry point with dry-run support.
+- F2-triggered debug evidence output for live static sessions.
+- UI template detection and prototype-style repeated UI click handling.
 
-No GUI, UI state handling, dynamic-background `space` handling, debug evidence output, or multi-process/shared-memory orchestration has been done yet. A static live CLI exists and defaults to dry-run mode unless command execution is explicitly enabled.
+No GUI, dynamic-background `space` handling, or multi-process/shared-memory orchestration has been done yet. A static live CLI exists and defaults to dry-run mode unless command execution is explicitly enabled.
 
 ## Important Paths
 
@@ -547,7 +549,23 @@ Behavior:
 - Playing state calls `run_static_host_frame()` with the current static level and runtime state.
 - Periodically redetects the static map; default interval is the prototype `4.0s`.
 - When redetection finds a different static level, resets runtime state and continues processing the current frame with the new level.
-- Keeps hotkeys, UI-state handling, dynamic-background `space`, GUI controls, and long-running loop ownership outside this slice.
+- Runs UI automation before level detection/gameplay; while UI automation is active, emits UI plans and skips gameplay.
+- Resets the static session to detecting after a UI click burst completes.
+- Keeps hotkeys, dynamic-background `space`, GUI controls, and long-running loop ownership outside this slice.
+
+### UI Detection And Click Handling
+
+File: `src/autozuma/runtime/ui.py`
+
+Behavior:
+
+- Detects configured UI templates on full captured frames with grayscale `cv2.TM_CCOEFF_NORMED` matching.
+- Preserves prototype threshold behavior: a template matches only when confidence is greater than `0.75`.
+- Checks templates in registry order, which currently prioritizes `ok` before `continue`.
+- Schedules a prototype-equivalent click burst when a UI template is detected during the `1.0s` poll interval and no burst is already active.
+- Preserves prototype burst defaults: `5` attempts, immediate first click, `1.0s` delay after a successful click, `0.1s` delay after a missed re-detection.
+- Emits `CommandType.UI_CLICK` with the matched button center in captured-frame coordinates.
+- Keeps UI handling outside strategy and decision logic; session orchestration converts emitted UI commands through the existing execution-plan path.
 
 ### Live Static One-Frame Adapter
 
@@ -615,7 +633,23 @@ Behavior:
 - Defaults to `--dry-run`, so command plans are generated without mouse input unless `--no-dry-run` is passed.
 - Supports `--config`, repeated `--set KEY=VALUE`, `--window-title`, `--fps`, `--max-iterations`, `--virtual-mouse/--no-virtual-mouse`, map redetection interval, and static level confidence.
 - Uses config `virtual_mouse` when the CLI does not explicitly override virtual mouse mode.
-- Does not yet implement GUI controls, debug output, UI-state handling, `space`, or process orchestration.
+- Supports `--debug-dir` for F2 debug snapshots.
+- Does not yet implement GUI controls, UI-state handling, `space`, or process orchestration.
+
+### Debug Evidence Output
+
+File: `src/autozuma/runtime/debug.py`
+
+Behavior:
+
+- Provides a `DebugOutputSink` side-effect boundary and `FileDebugOutputSink`.
+- Writes one directory per requested snapshot containing the raw captured frame, JSON summary, and, when a host decision exists, the aligned ROI plus ROI overlay.
+- Builds JSON evidence from `StaticSessionFrameResult`, `StaticHostFrameResult`, and `StaticFrameDecisionResult` without reading live globals.
+- Summarizes session phase, map detection, runtime mode, coin activity, world counts, candidate counts, selected target, emitted commands, and execution plan steps.
+- Renders ROI overlays from the rich decision result with detected entities, selected target, secondary target, and launcher next-ball marker.
+- `run_live_loop_iteration()` passes the configured debug sink only on F2 rising-edge events while armed.
+- `run_live_static_session_frame()` owns capture-frame access and invokes the sink after the session frame has been processed.
+- Keeps strategy, perception, decision, and command planning free of debug-file side effects.
 
 ## Migrated Assets
 
@@ -642,7 +676,7 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 211 passed
+- `pytest`: 222 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
@@ -652,7 +686,11 @@ Last static live CLI smoke check:
 
 Last targeted live-loop check:
 
-- `.venv\Scripts\python -m pytest tests\test_control_hotkeys.py tests\test_runtime_loop.py tests\test_runtime_live.py tests\test_runtime_session.py`: 18 passed
+- `.venv\Scripts\python -m pytest tests\test_runtime_debug.py tests\test_runtime_loop.py tests\test_runtime_live.py tests\test_cli_live_static.py`: 15 passed
+
+Last targeted UI/session check:
+
+- `.venv\Scripts\python -m pytest tests\test_runtime_ui.py tests\test_runtime_session.py tests\test_runtime_debug.py tests\test_runtime_loop.py tests\test_runtime_live.py tests\test_cli_live_static.py`: 27 passed
 
 Last targeted static session/capture check:
 
@@ -673,14 +711,13 @@ Last targeted static-runtime check:
 
 ## Next Recommended Step
 
-The next clean step is to migrate debug evidence output behind the existing live-loop events and rich decision results.
+The next clean step is to migrate dynamic-background `space` handling or start the GUI/process orchestration layer, depending on which runtime path is more urgent.
 
 Suggested scope:
 
-- Handle F2 `debug_requested` events without coupling screenshot writing to strategy logic.
-- Save current captured frame or session/decision evidence through a small debug output adapter.
-- Consider a replay/debug renderer that consumes `StaticFrameDecisionResult` rather than reading live globals.
-- Keep GUI panel, UI-state detection, dynamic-background `space` handling, and multi-process/shared-memory orchestration outside this immediate slice unless the next session intentionally chooses one of those instead.
+- For `space`, add explicit dynamic-background detection/perception entry points without pretending it has a static background.
+- For orchestration, keep GUI/shared-state adapters outside pure perception and strategy modules.
+- Keep unrelated refactors out of the next slice.
 
 ## Design Rules To Preserve
 

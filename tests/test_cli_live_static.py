@@ -62,6 +62,7 @@ def test_live_static_cli_builds_dry_run_loop_params(monkeypatch, tmp_path, capsy
     assert params.live.session.host.execute_commands is False
     assert params.live.session.host.runtime.raw_values["n_fire_cooldown"] == 0.25
     assert params.live.session.host.runtime.raw_values["r_fire_cooldown"] == 0.4
+    assert params.debug_output.root.name == "debug"
     assert "iterations=3" in capsys.readouterr().out
 
 

@@ -8,6 +8,7 @@ from autozuma.assets.registry import load_asset_registry
 from autozuma.control.capture import capture_window_frame
 from autozuma.control.win32_executor import Win32CommandExecutor, find_game_window
 from autozuma.core.models import AssetRegistry, LauncherTemplateSet
+from autozuma.runtime.debug import DebugOutputSink
 from autozuma.runtime.session import (
     StaticSessionFrameResult,
     StaticSessionParams,
@@ -49,6 +50,7 @@ def run_live_static_session_frame(
     state: StaticSessionState,
     current_time: float,
     params: LiveStaticSessionParams,
+    debug_output: DebugOutputSink | None = None,
 ) -> StaticSessionFrameResult:
     """Capture one game-window frame and run the static session adapter."""
     hwnd, rect = find_game_window(params.window_title)
@@ -58,7 +60,7 @@ def run_live_static_session_frame(
         rect=rect,
         use_virtual=params.use_virtual_mouse,
     )
-    return run_static_session_frame(
+    result = run_static_session_frame(
         frame_bgr=frame_bgr,
         registry=context.registry,
         launcher_templates=context.launcher_templates,
@@ -67,3 +69,10 @@ def run_live_static_session_frame(
         params=params.session,
         driver=driver,
     )
+    if debug_output is not None:
+        debug_output.write(
+            frame_bgr=frame_bgr,
+            session_result=result,
+            current_time=current_time,
+        )
+    return result

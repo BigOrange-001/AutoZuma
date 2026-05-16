@@ -14,6 +14,7 @@ from autozuma.control.hotkeys import (
     Win32HotkeyReader,
     poll_hotkeys,
 )
+from autozuma.runtime.debug import DebugOutputSink
 from autozuma.runtime.live import (
     LiveStaticSessionContext,
     LiveStaticSessionParams,
@@ -60,6 +61,7 @@ class LiveLoopParams:
     live: LiveStaticSessionParams
     target_fps: float = 10.0
     idle_sleep_seconds: float = 0.001
+    debug_output: DebugOutputSink | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,7 @@ def run_live_loop_iteration(
             state=session_state,
             current_time=clock.time(),
             params=params.live,
+            debug_output=params.debug_output if poll_result.events.debug_requested else None,
         )
         session_state = frame_result.state
     else:

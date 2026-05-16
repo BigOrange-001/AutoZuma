@@ -95,6 +95,35 @@ def test_iteration_forced_safe_stops_running_live_frame(monkeypatch):
     assert result.hotkey_events.forced_safe is True
 
 
+def test_iteration_passes_debug_sink_to_live_frame_on_f2_edge(monkeypatch):
+    debug_output = object()
+    frame_result = SimpleNamespace(state=StaticSessionState(level_id="spiral"))
+    calls = {}
+
+    def fake_run_live_static_session_frame(**kwargs):
+        calls["live"] = kwargs
+        return frame_result
+
+    monkeypatch.setattr(
+        "autozuma.runtime.loop.run_live_static_session_frame",
+        fake_run_live_static_session_frame,
+    )
+
+    result = run_live_loop_iteration(
+        context="context",
+        state=LiveLoopState(
+            session=StaticSessionState(level_id="spiral"),
+            hotkeys=HotkeyControlState(is_armed=True),
+        ),
+        params=_params(debug_output=debug_output),
+        hotkey_reader=_Reader({Hotkey.F2: True}),
+        clock=_Clock(wall_time=42.0),
+    )
+
+    assert calls["live"]["debug_output"] is debug_output
+    assert result.hotkey_events.debug_requested is True
+
+
 def test_run_live_loop_paces_iterations_and_returns_last_frame(monkeypatch):
     results = [
         SimpleNamespace(state=StaticSessionState(level_id="one")),
@@ -139,7 +168,7 @@ def test_run_live_loop_rejects_invalid_target_fps():
         )
 
 
-def _params(target_fps=10.0) -> LiveLoopParams:
+def _params(target_fps=10.0, debug_output=None) -> LiveLoopParams:
     return LiveLoopParams(
         live=LiveStaticSessionParams(
             session=StaticSessionParams(
@@ -150,6 +179,7 @@ def _params(target_fps=10.0) -> LiveLoopParams:
             )
         ),
         target_fps=target_fps,
+        debug_output=debug_output,
     )
 
 
