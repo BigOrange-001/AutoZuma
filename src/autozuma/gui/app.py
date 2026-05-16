@@ -13,7 +13,13 @@ from autozuma.gui.schema import (
     build_gui_parameter_schema,
 )
 from autozuma.gui.i18n import SUPPORTED_LANGUAGES, translate
-from autozuma.runtime.config import load_runtime_values
+from autozuma.gui.settings import (
+    GuiHotkeySettings,
+    GuiSettings,
+    load_gui_settings,
+    save_gui_settings,
+)
+from autozuma.runtime.config import DEFAULT_RUNTIME_VALUES, load_runtime_values, save_runtime_values_to_ini
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,7 +44,7 @@ class AutoZumaGuiWindow:
 
     def __new__(cls):
         from PySide6.QtCore import QTimer, Qt
-        from PySide6.QtGui import QFont
+        from PySide6.QtGui import QFont, QKeySequence, QShortcut
         from PySide6.QtWidgets import (
             QCheckBox,
             QComboBox,
@@ -47,8 +53,10 @@ class AutoZumaGuiWindow:
             QGridLayout,
             QHBoxLayout,
             QLabel,
+            QFileDialog,
             QMainWindow,
             QPushButton,
+            QKeySequenceEdit,
             QScrollArea,
             QSizePolicy,
             QSpinBox,
@@ -67,7 +75,10 @@ class AutoZumaGuiWindow:
                 self.language = "en"
                 self.controller = GuiRuntimeController()
                 self.runtime_values = load_runtime_values()
+                self.gui_settings = load_gui_settings()
                 self.parameter_controls: dict[str, QWidget] = {}
+                self.hotkey_controls: dict[str, QKeySequenceEdit] = {}
+                self.shortcuts: dict[str, QShortcut] = {}
                 self.status_values: dict[str, QLabel] = {}
                 self.localized_widgets: dict[str, list[QWidget]] = defaultdict(list)
                 self.localized_tabs: list[tuple[QTabWidget, int, str]] = []
@@ -87,6 +98,7 @@ class AutoZumaGuiWindow:
                 layout.addWidget(_main_area(self, schema), 1)
                 self.setCentralWidget(root)
                 self._retranslate()
+                self._install_shortcuts()
                 self._append_log("GUI connected in dry-run mode")
 
             def _t(self, key: str) -> str:
@@ -133,6 +145,12 @@ class AutoZumaGuiWindow:
                 self._set_status("state", "armed")
                 self._append_log("armed dry-run live loop")
 
+            def _toggle_arm(self) -> None:
+                if self.controller.is_armed:
+                    self._safe()
+                else:
+                    self._arm()
+
             def _safe(self) -> None:
                 self.timer.stop()
                 self.controller.safe()
@@ -170,6 +188,98 @@ class AutoZumaGuiWindow:
                     elif isinstance(control, (QSpinBox, QDoubleSpinBox)):
                         values[key] = float(control.value())
                 return values
+
+            def _load_ini(self) -> None:
+                path, _ = QFileDialog.getOpenFileName(
+                    self,
+                    "Load strategy INI",
+                    "config",
+                    "INI files (*.ini);;All files (*)",
+                )
+                if not path:
+                    return
+                try:
+                    self.runtime_values = load_runtime_values(path)
+                    self._apply_runtime_values(self.runtime_values)
+                    self._append_log(f"loaded ini: {path}")
+                except Exception as exc:  # noqa: BLE001 - GUI boundary reports file failures.
+                    self._append_log(f"load failed: {exc}")
+
+            def _save_preset(self) -> None:
+                path, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Save strategy preset",
+                    "config/strategy_gui_saved.ini",
+                    "INI files (*.ini);;All files (*)",
+                )
+                if not path:
+                    return
+                try:
+                    save_runtime_values_to_ini(path, self._current_values())
+                    self._save_gui_hotkeys()
+                    self._append_log(f"saved preset: {path}")
+                except Exception as exc:  # noqa: BLE001 - GUI boundary reports file failures.
+                    self._append_log(f"save failed: {exc}")
+
+            def _reset_defaults(self) -> None:
+                self.runtime_values = dict(DEFAULT_RUNTIME_VALUES)
+                self._apply_runtime_values(self.runtime_values)
+                self.gui_settings = GuiSettings()
+                self._apply_hotkey_settings(self.gui_settings.hotkeys)
+                self._save_gui_hotkeys()
+                self._append_log("reset defaults")
+
+            def _apply_runtime_values(self, values: dict[str, float]) -> None:
+                for key, value in values.items():
+                    control = self.parameter_controls.get(key)
+                    if isinstance(control, QCheckBox):
+                        control.setChecked(value >= 0.5)
+                    elif isinstance(control, (QSpinBox, QDoubleSpinBox)):
+                        control.setValue(float(value))
+
+            def _apply_hotkey_settings(self, hotkeys: GuiHotkeySettings) -> None:
+                for name, key_sequence in (
+                    ("toggle_arm", hotkeys.toggle_arm),
+                    ("snapshot", hotkeys.snapshot),
+                    ("safe", hotkeys.safe),
+                ):
+                    control = self.hotkey_controls.get(name)
+                    if control is not None:
+                        control.setKeySequence(QKeySequence(key_sequence))
+                self._install_shortcuts()
+
+            def _save_gui_hotkeys(self) -> None:
+                self.gui_settings = GuiSettings(
+                    hotkeys=GuiHotkeySettings(
+                        toggle_arm=self._hotkey_text("toggle_arm"),
+                        snapshot=self._hotkey_text("snapshot"),
+                        safe=self._hotkey_text("safe"),
+                    )
+                )
+                save_gui_settings(self.gui_settings)
+                self._install_shortcuts()
+
+            def _hotkey_text(self, name: str) -> str:
+                control = self.hotkey_controls.get(name)
+                if control is None:
+                    return getattr(GuiHotkeySettings(), name)
+                return control.keySequence().toString() or getattr(GuiHotkeySettings(), name)
+
+            def _install_shortcuts(self) -> None:
+                for shortcut in self.shortcuts.values():
+                    shortcut.setParent(None)
+                self.shortcuts = {}
+
+                for name, callback in (
+                    ("toggle_arm", self._toggle_arm),
+                    ("snapshot", self._snapshot),
+                    ("safe", self._safe),
+                ):
+                    key_text = self._hotkey_text(name)
+                    shortcut = QShortcut(QKeySequence(key_text), self)
+                    shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+                    shortcut.activated.connect(callback)
+                    self.shortcuts[name] = shortcut
 
             def _set_status(self, key: str, value: str) -> None:
                 label = self.status_values.get(key)
@@ -263,10 +373,24 @@ class AutoZumaGuiWindow:
             layout.addWidget(runtime)
 
             presets = _card(window, "presets")
-            for text in ("load_ini", "save_preset", "reset_defaults"):
+            for text, callback in (
+                ("load_ini", window._load_ini),
+                ("save_preset", window._save_preset),
+                ("reset_defaults", window._reset_defaults),
+            ):
                 button = window._localized_button(text, "GhostButton")
+                button.clicked.connect(callback)
                 presets.layout().addWidget(button)
             layout.addWidget(presets)
+
+            hotkeys = _card(window, "hotkeys")
+            for label, name, value in (
+                ("toggle_arm", "toggle_arm", window.gui_settings.hotkeys.toggle_arm),
+                ("snapshot_key", "snapshot", window.gui_settings.hotkeys.snapshot),
+                ("safe_key", "safe", window.gui_settings.hotkeys.safe),
+            ):
+                hotkeys.layout().addWidget(_hotkey_row(window, label, name, value))
+            layout.addWidget(hotkeys)
 
             layout.addStretch()
             return panel
@@ -404,6 +528,24 @@ class AutoZumaGuiWindow:
             layout.addWidget(name)
             layout.addStretch()
             layout.addWidget(data)
+            return row
+
+        def _hotkey_row(
+            window: _Window,
+            label_key: str,
+            name: str,
+            value: str,
+        ) -> QWidget:
+            row = QWidget()
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(0, 0, 0, 0)
+            label = window._localized_label(label_key, "Muted")
+            edit = QKeySequenceEdit(QKeySequence(value))
+            edit.editingFinished.connect(window._save_gui_hotkeys)
+            window.hotkey_controls[name] = edit
+            layout.addWidget(label)
+            layout.addStretch()
+            layout.addWidget(edit)
             return row
 
         return _Window()

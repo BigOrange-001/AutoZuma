@@ -7,6 +7,7 @@ from autozuma.runtime.config import (
     load_runtime_values,
     load_runtime_values_from_ini,
     parse_runtime_overrides,
+    save_runtime_values_to_ini,
 )
 
 
@@ -73,3 +74,13 @@ def test_default_runtime_values_match_bundled_strategy_file():
     values = load_runtime_values_from_ini(bundled_path)
 
     assert values["n_fire_cooldown"] == DEFAULT_RUNTIME_VALUES["n_fire_cooldown"]
+
+
+def test_save_runtime_values_to_ini_writes_strategy_section(tmp_path):
+    path = tmp_path / "saved.ini"
+
+    save_runtime_values_to_ini(path, {"N_FIRE_COOLDOWN": 0.25, "virtual_mouse": 1})
+
+    values = load_runtime_values_from_ini(path)
+    assert values["n_fire_cooldown"] == 0.25
+    assert values["virtual_mouse"] == 1.0

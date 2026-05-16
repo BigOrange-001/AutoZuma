@@ -26,6 +26,11 @@ Behavior:
 - Supports English/Chinese language switching for GUI chrome while preserving raw
   config keys for debugging and later config writes.
 - Arm/Safe/Snapshot controls are wired through `GuiRuntimeController`.
+- Default shortcuts preserve the prototype controls: F1 toggles Arm/Safe, F2
+  saves a snapshot, and F3 forces Safe.
+- Shortcuts are editable in the GUI and persisted to `config/gui_settings.json`.
+- `Load INI`, `Save Preset`, and `Reset Defaults` are wired for strategy/runtime
+  parameter files.
 - GUI runtime operation uses the existing static live adapter and always builds
   `StaticHostFrameParams(execute_commands=False)`, so the first GUI integration is
   dry-run only.
@@ -48,8 +53,8 @@ Behavior:
 
 Validation:
 
-- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_gui_schema.py tests\test_gui_i18n.py` passed: 8 tests.
-- `.venv\Scripts\python -m pytest` passed: 230 tests.
+- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_gui_schema.py tests\test_gui_i18n.py tests\test_gui_settings.py tests\test_runtime_config.py` passed: 18 tests.
+- `.venv\Scripts\python -m pytest` passed: 233 tests.
 - `.venv\Scripts\python -m ruff check .` passed.
 - `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
   `space` special-detection note.

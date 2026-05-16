@@ -96,6 +96,20 @@ def load_runtime_values_from_ini(path: Path | str) -> dict[str, float]:
     return values
 
 
+def save_runtime_values_to_ini(path: Path | str, values: Mapping[str, float]) -> None:
+    """Save numeric runtime values to a prototype-compatible strategy INI file."""
+    config = configparser.ConfigParser()
+    config.optionxform = str.lower
+    config["STRATEGY"] = {
+        key.lower(): str(float(value))
+        for key, value in sorted(_normalize_mapping(values).items())
+    }
+    config_path = Path(path)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with config_path.open("w", encoding="utf-8") as file:
+        config.write(file)
+
+
 def parse_runtime_overrides(items: list[str] | tuple[str, ...]) -> dict[str, float]:
     """Parse CLI KEY=VALUE runtime overrides."""
     overrides: dict[str, float] = {}

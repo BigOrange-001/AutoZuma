@@ -655,6 +655,9 @@ Behavior:
 - Reserves the prototype/runtime parameter surface across General, Normal, Rescue, and Endgame tabs.
 - Supports English/Chinese language switching for the GUI chrome while preserving raw config keys.
 - Arm/Safe/Snapshot controls are wired through `GuiRuntimeController`.
+- Default GUI shortcuts preserve the prototype controls: F1 toggles Arm/Safe, F2 saves a snapshot, and F3 forces Safe.
+- GUI shortcuts are editable in the Hotkeys card and persisted to `config/gui_settings.json`.
+- `Load INI`, `Save Preset`, and `Reset Defaults` are wired for strategy/runtime parameter files.
 - GUI runtime wiring is intentionally dry-run only: it calls existing live static session frames with `execute_commands=False`.
 - Snapshot reuses `FileDebugOutputSink`.
 - Runtime errors, including missing game windows, are caught at the GUI boundary and written to the event log.
@@ -701,7 +704,7 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 230 passed
+- `pytest`: 233 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
@@ -719,7 +722,7 @@ Last targeted UI/session check:
 
 Last targeted GUI check:
 
-- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_gui_schema.py tests\test_gui_i18n.py`: 8 passed
+- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_gui_schema.py tests\test_gui_i18n.py tests\test_gui_settings.py tests\test_runtime_config.py`: 18 passed
 - Offscreen PySide6 window construction smoke check passed.
 
 Last targeted static session/capture check:
