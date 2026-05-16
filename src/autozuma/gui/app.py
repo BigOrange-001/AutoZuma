@@ -1,0 +1,542 @@
+"""PySide6 tuning-panel mockup for AutoZuma Next."""
+
+from __future__ import annotations
+
+import sys
+from collections import defaultdict
+
+from autozuma.gui.controller import GuiRuntimeController, GuiRuntimeSettings
+from autozuma.gui.schema import (
+    GuiParameterDefinition,
+    GuiParameterKind,
+    GuiParameterMode,
+    build_gui_parameter_schema,
+)
+from autozuma.gui.i18n import SUPPORTED_LANGUAGES, translate
+from autozuma.runtime.config import load_runtime_values
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Launch the disconnected GUI shell."""
+    try:
+        from PySide6.QtWidgets import QApplication
+    except ImportError as exc:
+        raise SystemExit(
+            "AutoZuma GUI requires PySide6. Install the gui extra, for example: "
+            "pip install -e .[gui]"
+        ) from exc
+
+    app = QApplication(sys.argv if argv is None else [sys.argv[0], *argv])
+    app.setStyle("Fusion")
+    window = AutoZumaGuiWindow()
+    window.show()
+    return app.exec()
+
+
+class AutoZumaGuiWindow:
+    """Create a compact tuning-first PySide window lazily."""
+
+    def __new__(cls):
+        from PySide6.QtCore import QTimer, Qt
+        from PySide6.QtGui import QFont
+        from PySide6.QtWidgets import (
+            QCheckBox,
+            QComboBox,
+            QDoubleSpinBox,
+            QFrame,
+            QGridLayout,
+            QHBoxLayout,
+            QLabel,
+            QMainWindow,
+            QPushButton,
+            QScrollArea,
+            QSizePolicy,
+            QSpinBox,
+            QTabWidget,
+            QVBoxLayout,
+            QWidget,
+        )
+
+        class _Window(QMainWindow):
+            def __init__(self) -> None:
+                super().__init__()
+                self.setWindowTitle("AutoZuma Next")
+                self.resize(1180, 780)
+                self.setMinimumSize(980, 680)
+                self.setStyleSheet(_STYLE)
+                self.language = "en"
+                self.controller = GuiRuntimeController()
+                self.runtime_values = load_runtime_values()
+                self.parameter_controls: dict[str, QWidget] = {}
+                self.status_values: dict[str, QLabel] = {}
+                self.localized_widgets: dict[str, list[QWidget]] = defaultdict(list)
+                self.localized_tabs: list[tuple[QTabWidget, int, str]] = []
+                self.log_label: QLabel | None = None
+                self.log_lines: list[str] = []
+                self.timer = QTimer(self)
+                self.timer.setInterval(100)
+                self.timer.timeout.connect(self._tick)
+
+                schema = build_gui_parameter_schema(self.runtime_values)
+
+                root = QWidget()
+                layout = QVBoxLayout(root)
+                layout.setContentsMargins(0, 0, 0, 0)
+                layout.setSpacing(0)
+                layout.addWidget(_title_bar(self))
+                layout.addWidget(_main_area(self, schema), 1)
+                self.setCentralWidget(root)
+                self._retranslate()
+                self._append_log("GUI connected in dry-run mode")
+
+            def _t(self, key: str) -> str:
+                return translate(self.language, key)
+
+            def _localized_label(self, key: str, object_name: str | None = None) -> QLabel:
+                label = QLabel()
+                if object_name is not None:
+                    label.setObjectName(object_name)
+                self.localized_widgets[key].append(label)
+                return label
+
+            def _localized_button(self, key: str, object_name: str) -> QPushButton:
+                button = QPushButton()
+                button.setObjectName(object_name)
+                self.localized_widgets[key].append(button)
+                return button
+
+            def _set_language(self, language: str) -> None:
+                if language in SUPPORTED_LANGUAGES:
+                    self.language = language
+                    self._retranslate()
+
+            def _retranslate(self) -> None:
+                self.setWindowTitle(self._t("app_title"))
+                for key, widgets in self.localized_widgets.items():
+                    for widget in widgets:
+                        widget.setText(self._t(key))
+                for tabs, index, key in self.localized_tabs:
+                    tabs.setTabText(index, self._t(key))
+                if self.log_label is not None and not self.log_lines:
+                    self.log_label.setText(
+                        "16:55:03  "
+                        + self._t("log_config_loaded")
+                        + "\n16:55:03  "
+                        + self._t("log_gui_idle")
+                        + "\n16:55:03  "
+                        + self._t("log_disconnected")
+                    )
+
+            def _arm(self) -> None:
+                self.controller.arm()
+                self.timer.start()
+                self._set_status("state", "armed")
+                self._append_log("armed dry-run live loop")
+
+            def _safe(self) -> None:
+                self.timer.stop()
+                self.controller.safe()
+                self._set_status("state", "safe")
+                self._append_log("safe")
+
+            def _snapshot(self) -> None:
+                self._run_step(debug_snapshot=True)
+
+            def _tick(self) -> None:
+                self._run_step(debug_snapshot=False)
+
+            def _run_step(self, *, debug_snapshot: bool) -> None:
+                try:
+                    result = self.controller.step(
+                        self._settings(),
+                        debug_snapshot=debug_snapshot,
+                    )
+                except Exception as exc:  # noqa: BLE001 - GUI boundary reports runtime failures.
+                    self._append_log(f"error: {exc}")
+                    return
+
+                self._set_status("level", result.level_id or "none")
+                self._set_status("command", result.command_type)
+                self._append_log(f"{result.message}: {result.command_type}")
+
+            def _settings(self) -> GuiRuntimeSettings:
+                return GuiRuntimeSettings(raw_values=self._current_values())
+
+            def _current_values(self) -> dict[str, float]:
+                values = dict(self.runtime_values)
+                for key, control in self.parameter_controls.items():
+                    if isinstance(control, QCheckBox):
+                        values[key] = 1.0 if control.isChecked() else 0.0
+                    elif isinstance(control, (QSpinBox, QDoubleSpinBox)):
+                        values[key] = float(control.value())
+                return values
+
+            def _set_status(self, key: str, value: str) -> None:
+                label = self.status_values.get(key)
+                if label is not None:
+                    label.setText(value)
+
+            def _append_log(self, line: str) -> None:
+                self.log_lines.append(line)
+                self.log_lines = self.log_lines[-40:]
+                if self.log_label is not None:
+                    self.log_label.setText("\n".join(self.log_lines))
+
+        def _title_bar(window: _Window) -> QWidget:
+            bar = QFrame()
+            bar.setObjectName("TitleBar")
+            layout = QHBoxLayout(bar)
+            layout.setContentsMargins(16, 10, 16, 10)
+            layout.setSpacing(10)
+
+            badge = QLabel("AZ")
+            badge.setObjectName("Badge")
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(badge)
+
+            title = window._localized_label("app_title", "AppTitle")
+            title.setObjectName("AppTitle")
+            layout.addWidget(title)
+
+            status = window._localized_label("preview_status", "Muted")
+            layout.addWidget(status)
+            layout.addStretch()
+
+            for text, object_name in (
+                ("safe", "SafePill"),
+                ("dry_run", "InfoPill"),
+                ("config_loaded", "InfoPill"),
+            ):
+                pill = window._localized_label(text)
+                pill.setObjectName(object_name)
+                layout.addWidget(pill)
+
+            language_label = window._localized_label("language", "Muted")
+            layout.addWidget(language_label)
+            language = QComboBox()
+            language.addItem("English", "en")
+            language.addItem("中文", "zh")
+            language.currentIndexChanged.connect(
+                lambda: window._set_language(language.currentData())
+            )
+            layout.addWidget(language)
+            return bar
+
+        def _main_area(window: _Window, schema: tuple[GuiParameterDefinition, ...]) -> QWidget:
+            body = QWidget()
+            layout = QHBoxLayout(body)
+            layout.setContentsMargins(14, 14, 14, 14)
+            layout.setSpacing(12)
+            layout.addWidget(_left_panel(window))
+            layout.addWidget(_parameter_tabs(window, schema), 1)
+            layout.addWidget(_right_panel(window))
+            return body
+
+        def _left_panel(window: _Window) -> QWidget:
+            panel = QWidget()
+            panel.setFixedWidth(250)
+            layout = QVBoxLayout(panel)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(12)
+
+            controls = _card(window, "controls")
+            arm = window._localized_button("arm", "PrimaryButton")
+            safe = window._localized_button("safe_button", "GhostButton")
+            snapshot = window._localized_button("snapshot", "GhostButton")
+            arm.clicked.connect(window._arm)
+            safe.clicked.connect(window._safe)
+            snapshot.clicked.connect(window._snapshot)
+            controls.layout().addWidget(arm)
+            controls.layout().addWidget(safe)
+            controls.layout().addWidget(snapshot)
+            layout.addWidget(controls)
+
+            runtime = _card(window, "runtime")
+            for label, value in (
+                ("window", "zuma deluxe"),
+                ("state", "safe"),
+                ("level", "none"),
+                ("mode", "normal"),
+                ("command", "NO_OP"),
+            ):
+                runtime.layout().addWidget(_key_value(window, label, value))
+            layout.addWidget(runtime)
+
+            presets = _card(window, "presets")
+            for text in ("load_ini", "save_preset", "reset_defaults"):
+                button = window._localized_button(text, "GhostButton")
+                presets.layout().addWidget(button)
+            layout.addWidget(presets)
+
+            layout.addStretch()
+            return panel
+
+        def _right_panel(window: _Window) -> QWidget:
+            panel = QWidget()
+            panel.setFixedWidth(310)
+            layout = QVBoxLayout(panel)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(12)
+
+            preview = _card(window, "preview")
+            placeholder = window._localized_label("preview_placeholder")
+            placeholder.setObjectName("Preview")
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setMinimumHeight(210)
+            placeholder.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            preview.layout().addWidget(placeholder, 1)
+            layout.addWidget(preview, 1)
+
+            log = _card(window, "event_log")
+            log_text = QLabel()
+            window.log_label = log_text
+            log_text.setObjectName("LogText")
+            log_text.setFont(QFont("Consolas", 10))
+            log_text.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            log.layout().addWidget(log_text, 1)
+            layout.addWidget(log, 1)
+            return panel
+
+        def _parameter_tabs(window: _Window, schema: tuple[GuiParameterDefinition, ...]) -> QWidget:
+            tabs = QTabWidget()
+            tabs.setObjectName("ParamTabs")
+            for key, mode in (
+                ("tab_general", GuiParameterMode.GENERAL),
+                ("tab_normal", GuiParameterMode.NORMAL),
+                ("tab_rescue", GuiParameterMode.RESCUE),
+                ("tab_endgame", GuiParameterMode.ENDGAME),
+            ):
+                index = tabs.addTab(_parameter_page(window, _filter(schema, mode)), "")
+                window.localized_tabs.append((tabs, index, key))
+            return tabs
+
+        def _parameter_page(
+            window: _Window,
+            parameters: tuple[GuiParameterDefinition, ...],
+        ) -> QWidget:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setObjectName("ParamScroll")
+            content = QWidget()
+            layout = QVBoxLayout(content)
+            layout.setContentsMargins(12, 12, 12, 12)
+            layout.setSpacing(12)
+
+            grouped: dict[str, list[GuiParameterDefinition]] = defaultdict(list)
+            for parameter in parameters:
+                grouped[parameter.section].append(parameter)
+
+            for section, items in grouped.items():
+                section_card = _card(window, section)
+                for parameter in items:
+                    section_card.layout().addWidget(_parameter_row(window, parameter))
+                layout.addWidget(section_card)
+            layout.addStretch()
+            scroll.setWidget(content)
+            return scroll
+
+        def _parameter_row(window: _Window, parameter: GuiParameterDefinition) -> QWidget:
+            row = QFrame()
+            row.setObjectName("ParamRow")
+            layout = QGridLayout(row)
+            layout.setContentsMargins(0, 6, 0, 6)
+            layout.setHorizontalSpacing(12)
+            layout.setColumnStretch(0, 3)
+            layout.setColumnStretch(1, 2)
+
+            label = QLabel(parameter.label)
+            label.setObjectName("ParamLabel")
+            label.setToolTip(parameter.description)
+            layout.addWidget(label, 0, 0)
+
+            key = QLabel(parameter.key)
+            key.setObjectName("ParamKey")
+            layout.addWidget(key, 1, 0)
+
+            if parameter.kind is GuiParameterKind.TOGGLE:
+                control = QCheckBox()
+                control.setChecked(parameter.default >= 0.5)
+                layout.addWidget(control, 0, 1, 2, 1, Qt.AlignmentFlag.AlignRight)
+                window.parameter_controls[parameter.key] = control
+            elif parameter.kind is GuiParameterKind.RANK:
+                spin = QSpinBox()
+                spin.setRange(int(parameter.minimum), int(parameter.maximum))
+                spin.setSingleStep(int(parameter.step))
+                spin.setValue(int(round(parameter.default)))
+                layout.addWidget(spin, 0, 1, 2, 1)
+                window.parameter_controls[parameter.key] = spin
+            else:
+                spin = QDoubleSpinBox()
+                spin.setRange(parameter.minimum, parameter.maximum)
+                spin.setSingleStep(parameter.step)
+                spin.setDecimals(3)
+                spin.setValue(parameter.default)
+                layout.addWidget(spin, 0, 1, 2, 1)
+                window.parameter_controls[parameter.key] = spin
+            return row
+
+        def _filter(
+            schema: tuple[GuiParameterDefinition, ...],
+            mode: GuiParameterMode,
+        ) -> tuple[GuiParameterDefinition, ...]:
+            return tuple(parameter for parameter in schema if parameter.mode is mode)
+
+        def _card(window: _Window, title_key: str) -> QFrame:
+            card = QFrame()
+            card.setObjectName("Card")
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(14, 12, 14, 14)
+            layout.setSpacing(9)
+            header = window._localized_label(title_key, "CardTitle")
+            header.setObjectName("CardTitle")
+            layout.addWidget(header)
+            return card
+
+        def _key_value(window: _Window, label_key: str, value: str) -> QWidget:
+            row = QWidget()
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(0, 0, 0, 0)
+            name = window._localized_label(label_key, "Muted")
+            name.setObjectName("Muted")
+            data = QLabel(value)
+            data.setObjectName("Value")
+            window.status_values[label_key] = data
+            layout.addWidget(name)
+            layout.addStretch()
+            layout.addWidget(data)
+            return row
+
+        return _Window()
+
+
+_STYLE = """
+QWidget {
+    background: #25282d;
+    color: #f0f3f8;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+}
+#TitleBar {
+    background: #1e2126;
+    border-bottom: 1px solid #15181c;
+}
+#Badge {
+    background: #756dd6;
+    border-radius: 16px;
+    min-width: 32px;
+    min-height: 32px;
+    max-width: 32px;
+    max-height: 32px;
+    font-weight: 800;
+}
+#AppTitle {
+    font-size: 17px;
+    font-weight: 800;
+}
+#Muted, #ParamKey {
+    color: #aab3c2;
+}
+#Value {
+    color: #f7d36c;
+    font-weight: 700;
+}
+#SafePill, #InfoPill {
+    border-radius: 13px;
+    padding: 5px 10px;
+    font-weight: 800;
+}
+#SafePill {
+    background: #233a2b;
+    color: #78e08f;
+}
+#InfoPill {
+    background: #30344d;
+    color: #c8c4ff;
+}
+#Card {
+    background: #2b2f35;
+    border: 1px solid #171a1f;
+    border-radius: 9px;
+}
+#CardTitle {
+    color: #ffffff;
+    font-size: 17px;
+    font-weight: 800;
+}
+QPushButton#PrimaryButton {
+    background: #756dd6;
+    border: 0;
+    border-radius: 16px;
+    padding: 9px 14px;
+    font-weight: 800;
+}
+QPushButton#GhostButton {
+    background: #282c32;
+    border: 1px solid #737b8c;
+    border-radius: 16px;
+    padding: 8px 14px;
+    font-weight: 700;
+}
+QPushButton#GhostButton:hover, QPushButton#PrimaryButton:hover {
+    background: #837be8;
+}
+#Preview, #LogText {
+    background: #20242a;
+    border: 1px solid #414852;
+    border-radius: 8px;
+    padding: 12px;
+}
+#Preview {
+    color: #87909f;
+    font-size: 18px;
+}
+#LogText {
+    color: #cbd4e0;
+}
+QTabWidget::pane {
+    border: 1px solid #171a1f;
+    border-radius: 9px;
+    background: #2b2f35;
+}
+QTabBar::tab {
+    background: #20242a;
+    color: #cbd4e0;
+    padding: 9px 18px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background: #756dd6;
+    color: white;
+    font-weight: 800;
+}
+QScrollArea#ParamScroll {
+    border: 0;
+}
+#ParamRow {
+    background: #30343b;
+    border-radius: 7px;
+}
+#ParamLabel {
+    font-weight: 750;
+}
+QDoubleSpinBox, QSpinBox {
+    background: #20242a;
+    border: 1px solid #4b5360;
+    border-radius: 7px;
+    padding: 5px 8px;
+    min-width: 96px;
+}
+QDoubleSpinBox:focus, QSpinBox:focus {
+    border: 1px solid #8b84ef;
+}
+QCheckBox::indicator {
+    width: 38px;
+    height: 20px;
+}
+"""
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

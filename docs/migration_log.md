@@ -2,6 +2,59 @@
 
 ## 2026-05-16
 
+### GUI Tuning Panel Baseline
+
+Added the first PySide6 GUI tuning panel and wired it to the existing static
+live adapter in dry-run mode.
+
+Added:
+
+- `src/autozuma/gui/schema.py`.
+- `src/autozuma/gui/i18n.py`.
+- `src/autozuma/gui/controller.py`.
+- `src/autozuma/gui/app.py`.
+- Optional `gui` extra with `PySide6`.
+- `autozuma-gui` project script.
+- GUI tests in `tests/test_gui_schema.py`, `tests/test_gui_i18n.py`, and
+  `tests/test_gui_controller.py`.
+
+Behavior:
+
+- Builds a dark operations-console style UI with a top status bar and a
+  tuning-first three-column layout: controls/status, parameter tabs, and
+  preview/log placeholders.
+- Supports English/Chinese language switching for GUI chrome while preserving raw
+  config keys for debugging and later config writes.
+- Arm/Safe/Snapshot controls are wired through `GuiRuntimeController`.
+- GUI runtime operation uses the existing static live adapter and always builds
+  `StaticHostFrameParams(execute_commands=False)`, so the first GUI integration is
+  dry-run only.
+- Snapshot reuses `FileDebugOutputSink`.
+- Missing game windows and other live-frame failures are caught at the GUI
+  boundary and reported in the event log.
+- Reserves the current and prototype parameter surface in GUI metadata:
+  - General controls for virtual mouse, detailed analysis, coin timing, mode
+    thresholds, and track exclusion.
+  - Normal/Rescue/Endgame controls for timing, geometry, action memory,
+    prediction, and ranked target priorities.
+  - Reserved prototype fields such as `soft_lock_ttl` and `predict_radius_th`
+    are present even though the current runtime adapter does not consume them
+    yet.
+- Loads current config values through `load_runtime_values()` so the mockup uses
+  bundled INI/default values for initial controls.
+- Keeps command execution, GUI process orchestration, and shared live state as
+  explicit follow-ups rather than coupling the first visual shell to mouse side
+  effects.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_gui_schema.py tests\test_gui_i18n.py` passed: 8 tests.
+- `.venv\Scripts\python -m pytest` passed: 230 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+- Offscreen PySide6 window construction smoke check passed.
+
 ### UI Detection And Click Handling Baseline
 
 Migrated prototype UI button detection and repeated click handling behind the

@@ -51,8 +51,9 @@ The current refactor has completed the foundation layers:
 - Prototype-compatible INI config loading and static live CLI entry point with dry-run support.
 - F2-triggered debug evidence output for live static sessions.
 - UI template detection and prototype-style repeated UI click handling.
+- PySide6 GUI shell with reserved prototype/runtime parameter controls and dry-run live controller wiring.
 
-No GUI, dynamic-background `space` handling, or multi-process/shared-memory orchestration has been done yet. A static live CLI exists and defaults to dry-run mode unless command execution is explicitly enabled.
+No GUI mouse-execution toggle, dynamic-background `space` handling, or multi-process/shared-memory orchestration has been done yet. A static live CLI exists and defaults to dry-run mode unless command execution is explicitly enabled.
 
 ## Important Paths
 
@@ -636,6 +637,30 @@ Behavior:
 - Supports `--debug-dir` for F2 debug snapshots.
 - Does not yet implement GUI controls, UI-state handling, `space`, or process orchestration.
 
+### GUI Shell Mockup
+
+Files:
+
+- `src/autozuma/gui/schema.py`
+- `src/autozuma/gui/i18n.py`
+- `src/autozuma/gui/controller.py`
+- `src/autozuma/gui/app.py`
+
+Behavior:
+
+- Provides `autozuma-gui` and `python -m autozuma.gui.app` entry points.
+- Uses PySide6 as an optional `gui` dependency.
+- Builds a dark operations-console style tuning panel inspired by the newer reference UI.
+- Uses a tuning-first three-column layout: compact controls/status on the left, parameter tabs in the center, and preview/log placeholders on the right.
+- Reserves the prototype/runtime parameter surface across General, Normal, Rescue, and Endgame tabs.
+- Supports English/Chinese language switching for the GUI chrome while preserving raw config keys.
+- Arm/Safe/Snapshot controls are wired through `GuiRuntimeController`.
+- GUI runtime wiring is intentionally dry-run only: it calls existing live static session frames with `execute_commands=False`.
+- Snapshot reuses `FileDebugOutputSink`.
+- Runtime errors, including missing game windows, are caught at the GUI boundary and written to the event log.
+- Keeps mouse execution, process orchestration, and shared runtime state outside this GUI slice.
+- `tests/test_gui_schema.py` verifies the GUI schema reserves all loaded runtime config keys, including currently reserved prototype fields such as `soft_lock_ttl` and `predict_radius_th`.
+
 ### Debug Evidence Output
 
 File: `src/autozuma/runtime/debug.py`
@@ -676,7 +701,7 @@ Run from `AutoZumaNext/`:
 
 Last known full-suite results:
 
-- `pytest`: 222 passed
+- `pytest`: 230 passed
 - `ruff check`: all checks passed
 - asset CLI: passed with the expected `space` note
 
@@ -691,6 +716,11 @@ Last targeted live-loop check:
 Last targeted UI/session check:
 
 - `.venv\Scripts\python -m pytest tests\test_runtime_ui.py tests\test_runtime_session.py tests\test_runtime_debug.py tests\test_runtime_loop.py tests\test_runtime_live.py tests\test_cli_live_static.py`: 27 passed
+
+Last targeted GUI check:
+
+- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_gui_schema.py tests\test_gui_i18n.py`: 8 passed
+- Offscreen PySide6 window construction smoke check passed.
 
 Last targeted static session/capture check:
 
@@ -711,7 +741,7 @@ Last targeted static-runtime check:
 
 ## Next Recommended Step
 
-The next clean step is to migrate dynamic-background `space` handling or start the GUI/process orchestration layer, depending on which runtime path is more urgent.
+The next clean step is to add a guarded GUI command-execution toggle, migrate dynamic-background `space` handling, or start the process orchestration layer, depending on which runtime path is more urgent.
 
 Suggested scope:
 

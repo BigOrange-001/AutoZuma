@@ -15,10 +15,14 @@ dev = [
     "pytest",
     "ruff",
 ]
+gui = [
+    "PySide6",
+]
 
 [project.scripts]
 autozuma-validate-assets = "autozuma.cli.validate_assets:main"
 autozuma-live-static = "autozuma.cli.live_static:main"
+autozuma-gui = "autozuma.gui.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
