@@ -20,6 +20,8 @@ build/
 *.log
 screenshot/
 debug_records/
+debug/
+config/gui_settings.json
 
 .idea/
 .vscode/

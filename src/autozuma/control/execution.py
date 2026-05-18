@@ -36,10 +36,10 @@ class ExecutionDriver(Protocol):
     """Side-effect boundary consumed by execution plans."""
 
     def left_click(self, target: Point) -> None:
-        """Shoot/click the game field at a screen-frame target."""
+        """Shoot/click the game field at a captured-frame target."""
 
     def ui_click(self, target: Point) -> None:
-        """Click a UI element at a screen-frame target."""
+        """Click a UI element at a captured-frame target."""
 
     def right_click(self) -> None:
         """Trigger the launcher swap action."""

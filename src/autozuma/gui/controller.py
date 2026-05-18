@@ -22,9 +22,10 @@ from autozuma.runtime.loop import LiveLoopState, initial_live_loop_state
 
 @dataclass(frozen=True)
 class GuiRuntimeSettings:
-    """Settings supplied by the GUI for dry-run live control."""
+    """Settings supplied by the GUI for live control."""
 
     raw_values: Mapping[str, float]
+    execute_commands: bool = False
     window_title: str = "zuma deluxe"
     fps: float = 10.0
     map_redetect_interval: float = 4.0
@@ -40,10 +41,12 @@ class GuiRuntimeStep:
     level_id: str | None
     command_type: str
     message: str
+    commands_enabled: bool = False
+    mouse_mode: str = "virtual"
 
 
 class GuiRuntimeController:
-    """Small dry-run bridge from GUI controls to the existing live static adapter."""
+    """Small bridge from GUI controls to the existing live static adapter."""
 
     def __init__(
         self,
@@ -60,7 +63,7 @@ class GuiRuntimeController:
         self.is_armed = False
 
     def arm(self) -> None:
-        """Arm dry-run frame processing and reset session detection state."""
+        """Arm frame processing and reset session detection state."""
         self.is_armed = True
         self.state = replace(initial_live_loop_state(), hotkeys=self.state.hotkeys)
 
@@ -74,7 +77,7 @@ class GuiRuntimeController:
         *,
         debug_snapshot: bool = False,
     ) -> GuiRuntimeStep:
-        """Run one dry-run live frame when armed."""
+        """Run one live frame when armed."""
         if not self.is_armed and not debug_snapshot:
             return GuiRuntimeStep(
                 state=self.state,
@@ -86,11 +89,12 @@ class GuiRuntimeController:
         if self._context is None:
             self._context = self._context_factory()
 
+        commands_enabled = settings.execute_commands and self.is_armed and not debug_snapshot
         result = self._frame_runner(
             context=self._context,
             state=self.state.session,
             current_time=self._clock(),
-            params=_live_params(settings),
+            params=_live_params(settings, execute_commands=commands_enabled),
             debug_output=FileDebugOutputSink(settings.debug_dir) if debug_snapshot else None,
         )
         self.state = LiveLoopState(session=result.state, hotkeys=self.state.hotkeys)
@@ -100,15 +104,21 @@ class GuiRuntimeController:
             level_id=result.state.level_id,
             command_type=command_type,
             message="snapshot" if debug_snapshot else "frame",
+            commands_enabled=commands_enabled,
+            mouse_mode="virtual" if bool(settings.raw_values.get("virtual_mouse", 0.0)) else "physical",
         )
 
 
-def _live_params(settings: GuiRuntimeSettings) -> LiveStaticSessionParams:
+def _live_params(
+    settings: GuiRuntimeSettings,
+    *,
+    execute_commands: bool,
+) -> LiveStaticSessionParams:
     return LiveStaticSessionParams(
         session=StaticSessionParams(
             host=StaticHostFrameParams(
                 runtime=StaticRuntimeFrameParams(raw_values=settings.raw_values),
-                execute_commands=False,
+                execute_commands=execute_commands,
             ),
             level_min_confidence=settings.level_min_confidence,
             map_redetect_interval=settings.map_redetect_interval,

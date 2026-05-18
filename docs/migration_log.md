@@ -2,6 +2,122 @@
 
 ## 2026-05-16
 
+### GUI Command Execution Toggle
+
+Added a guarded GUI command-execution toggle on top of the existing dry-run live
+adapter.
+
+Changed:
+
+- `GuiRuntimeSettings` now carries `execute_commands`, defaulting to `False`.
+- `GuiRuntimeController` forwards that value into `StaticHostFrameParams`.
+- The PySide6 Controls panel includes a visible `Enable mouse execution` checkbox.
+- The top status bar switches between `DRY RUN` and `EXECUTION ENABLED`.
+- GUI localization includes labels for the new execution state and checkbox.
+- `tests/test_gui_controller.py` verifies the GUI bridge still defaults to
+  dry-run and can explicitly enable command execution.
+
+Behavior:
+
+- GUI startup remains dry-run by default.
+- Arm/Safe/Snapshot behavior is unchanged.
+- Real mouse dispatch only occurs when the GUI checkbox sets
+  `execute_commands=True`.
+- The existing `virtual_mouse` runtime parameter is still honored by
+  `LiveStaticSessionParams.use_virtual_mouse`; when enabled, execution uses the
+  Win32 virtual/background message path instead of physical cursor movement.
+- Process orchestration and shared runtime state remain outside the GUI slice.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_gui_i18n.py tests\test_gui_schema.py tests\test_runtime_live.py` passed: 12 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+
+### GUI Global Hotkey Polling
+
+Aligned GUI F1/F2/F3 behavior with the prototype I/O loop.
+
+Changed:
+
+- `src/autozuma/gui/app.py` now starts a 50 ms Win32 hotkey poll timer.
+- The GUI reuses `Win32HotkeyReader` and `poll_hotkeys()` from
+  `src/autozuma/control/hotkeys.py`.
+- Default F1/F2/F3 no longer install duplicate Qt window shortcuts, avoiding
+  double toggles when the GUI has focus.
+- `README.md` documents that F1/F2/F3 are global Win32 hotkeys.
+
+Behavior:
+
+- F1 toggles Arm/Safe while either the GUI or game window has focus.
+- F2 requests a debug snapshot.
+- F3 forces Safe.
+- Editable non-F1/F2/F3 GUI shortcuts remain window-scoped Qt shortcuts.
+- Window discovery remains aligned with the prototype: visible window title must
+  contain `zuma deluxe` case-insensitively, and capture uses the client rect.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_control_hotkeys.py tests\test_gui_controller.py tests\test_gui_i18n.py tests\test_gui_schema.py` passed: 13 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- Offscreen PySide6 window construction smoke check passed.
+
+### GUI Command Dispatch Diagnostics
+
+Clarified GUI event-log behavior after live testing reached map detection and
+`shoot` planning but did not visibly click.
+
+Changed:
+
+- `GuiRuntimeStep` now reports whether command dispatch was enabled for that
+  frame and which mouse mode was selected.
+- GUI event-log command lines show `planned`, `executed/virtual`, or
+  `executed/physical`.
+- Snapshot frames force dry-run command handling even if the GUI execution
+  checkbox is enabled.
+- `tests/test_gui_controller.py` covers dry-run reporting, explicit execution,
+  and snapshot dry-run enforcement.
+
+Behavior:
+
+- `shoot (planned)` means the strategy produced a shot but the execution driver
+  was intentionally not called.
+- `shoot (executed/virtual)` means the driver used the prototype-style
+  `SendMessage` virtual mouse path.
+- `shoot (executed/physical)` means the driver used physical cursor movement and
+  `SendInput`.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_control_hotkeys.py tests\test_runtime_live.py` passed: 12 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+
+### Win32 Client Coordinate Execution Fix
+
+Fixed live physical mouse shots firing toward the top-left of the game window.
+
+Cause:
+
+- Live capture frames are client-window images, so strategy command targets are
+  client/captured-frame coordinates.
+- `Win32CommandExecutor` previously treated those targets as absolute screen
+  coordinates.
+- Physical execution then clamped small client coordinates against the absolute
+  window rect, pushing shots to the top-left edge.
+
+Changed:
+
+- `Win32CommandExecutor` now accepts client-frame targets.
+- Physical clicks add `WindowRect.left/top` before clamping and `SetCursorPos`.
+- Virtual clicks send client coordinates directly through `SendMessage`.
+- Execution/command mapping docstrings now describe captured-frame coordinates.
+- Added `tests/test_win32_executor.py` for client-to-screen conversion and
+  clamping behavior.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_win32_executor.py tests\test_control_execution.py tests\test_control_commands.py tests\test_runtime_live.py tests\test_runtime_host.py tests\test_gui_controller.py` passed: 24 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+
 ### GUI Tuning Panel Baseline
 
 Added the first PySide6 GUI tuning panel and wired it to the existing static

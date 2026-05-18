@@ -19,6 +19,7 @@ from autozuma.gui.settings import (
     load_gui_settings,
     save_gui_settings,
 )
+from autozuma.control.hotkeys import HotkeyControlState, Win32HotkeyReader, poll_hotkeys
 from autozuma.runtime.config import DEFAULT_RUNTIME_VALUES, load_runtime_values, save_runtime_values_to_ini
 
 
@@ -80,6 +81,9 @@ class AutoZumaGuiWindow:
                 self.hotkey_controls: dict[str, QKeySequenceEdit] = {}
                 self.shortcuts: dict[str, QShortcut] = {}
                 self.status_values: dict[str, QLabel] = {}
+                self.execution_toggle: QCheckBox | None = None
+                self.hotkey_state = HotkeyControlState()
+                self.hotkey_reader = Win32HotkeyReader()
                 self.localized_widgets: dict[str, list[QWidget]] = defaultdict(list)
                 self.localized_tabs: list[tuple[QTabWidget, int, str]] = []
                 self.log_label: QLabel | None = None
@@ -87,6 +91,9 @@ class AutoZumaGuiWindow:
                 self.timer = QTimer(self)
                 self.timer.setInterval(100)
                 self.timer.timeout.connect(self._tick)
+                self.hotkey_timer = QTimer(self)
+                self.hotkey_timer.setInterval(50)
+                self.hotkey_timer.timeout.connect(self._poll_global_hotkeys)
 
                 schema = build_gui_parameter_schema(self.runtime_values)
 
@@ -98,7 +105,9 @@ class AutoZumaGuiWindow:
                 layout.addWidget(_main_area(self, schema), 1)
                 self.setCentralWidget(root)
                 self._retranslate()
+                self._sync_execution_mode()
                 self._install_shortcuts()
+                self.hotkey_timer.start()
                 self._append_log("GUI connected in dry-run mode")
 
             def _t(self, key: str) -> str:
@@ -129,6 +138,7 @@ class AutoZumaGuiWindow:
                         widget.setText(self._t(key))
                 for tabs, index, key in self.localized_tabs:
                     tabs.setTabText(index, self._t(key))
+                self._sync_execution_mode()
                 if self.log_label is not None and not self.log_lines:
                     self.log_label.setText(
                         "16:55:03  "
@@ -143,7 +153,7 @@ class AutoZumaGuiWindow:
                 self.controller.arm()
                 self.timer.start()
                 self._set_status("state", "armed")
-                self._append_log("armed dry-run live loop")
+                self._append_log(f"armed live loop ({self._execution_mode_text()})")
 
             def _toggle_arm(self) -> None:
                 if self.controller.is_armed:
@@ -160,6 +170,22 @@ class AutoZumaGuiWindow:
             def _snapshot(self) -> None:
                 self._run_step(debug_snapshot=True)
 
+            def _poll_global_hotkeys(self) -> None:
+                try:
+                    poll_result = poll_hotkeys(self.hotkey_state, self.hotkey_reader)
+                except Exception as exc:  # noqa: BLE001 - GUI boundary reports hotkey failures.
+                    self.hotkey_timer.stop()
+                    self._append_log(f"global hotkeys unavailable: {exc}")
+                    return
+
+                self.hotkey_state = poll_result.state
+                if poll_result.events.toggled_arm:
+                    self._toggle_arm()
+                if poll_result.events.debug_requested:
+                    self._snapshot()
+                if poll_result.events.forced_safe:
+                    self._safe()
+
             def _tick(self) -> None:
                 self._run_step(debug_snapshot=False)
 
@@ -175,10 +201,39 @@ class AutoZumaGuiWindow:
 
                 self._set_status("level", result.level_id or "none")
                 self._set_status("command", result.command_type)
-                self._append_log(f"{result.message}: {result.command_type}")
+                dispatch = (
+                    f"executed/{result.mouse_mode}"
+                    if result.commands_enabled and result.command_type.lower() != "no_op"
+                    else "planned"
+                )
+                self._append_log(f"{result.message}: {result.command_type} ({dispatch})")
 
             def _settings(self) -> GuiRuntimeSettings:
-                return GuiRuntimeSettings(raw_values=self._current_values())
+                return GuiRuntimeSettings(
+                    raw_values=self._current_values(),
+                    execute_commands=self._execution_enabled(),
+                )
+
+            def _execution_enabled(self) -> bool:
+                return bool(self.execution_toggle is not None and self.execution_toggle.isChecked())
+
+            def _execution_mode_text(self) -> str:
+                return "execution enabled" if self._execution_enabled() else "dry-run"
+
+            def _set_execution_enabled(self, enabled: bool) -> None:
+                self._sync_execution_mode()
+                self._append_log("mouse execution enabled" if enabled else "dry-run mode enabled")
+
+            def _sync_execution_mode(self) -> None:
+                label = self.status_values.get("execution_mode")
+                if label is None:
+                    return
+                if self._execution_enabled():
+                    label.setText(self._t("execution_enabled"))
+                    _set_object_name(label, "DangerPill")
+                else:
+                    label.setText(self._t("dry_run"))
+                    _set_object_name(label, "InfoPill")
 
             def _current_values(self) -> dict[str, float]:
                 values = dict(self.runtime_values)
@@ -276,6 +331,8 @@ class AutoZumaGuiWindow:
                     ("safe", self._safe),
                 ):
                     key_text = self._hotkey_text(name)
+                    if key_text.upper() in {"F1", "F2", "F3"}:
+                        continue
                     shortcut = QShortcut(QKeySequence(key_text), self)
                     shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
                     shortcut.activated.connect(callback)
@@ -314,12 +371,16 @@ class AutoZumaGuiWindow:
 
             for text, object_name in (
                 ("safe", "SafePill"),
-                ("dry_run", "InfoPill"),
                 ("config_loaded", "InfoPill"),
             ):
                 pill = window._localized_label(text)
                 pill.setObjectName(object_name)
                 layout.addWidget(pill)
+
+            execution_pill = window._localized_label("dry_run")
+            execution_pill.setObjectName("InfoPill")
+            window.status_values["execution_mode"] = execution_pill
+            layout.addWidget(execution_pill)
 
             language_label = window._localized_label("language", "Muted")
             layout.addWidget(language_label)
@@ -359,6 +420,13 @@ class AutoZumaGuiWindow:
             controls.layout().addWidget(arm)
             controls.layout().addWidget(safe)
             controls.layout().addWidget(snapshot)
+            execution = QCheckBox()
+            execution.setObjectName("ExecutionToggle")
+            execution.setToolTip("Allow the GUI loop to dispatch planned mouse commands.")
+            execution.toggled.connect(window._set_execution_enabled)
+            window.localized_widgets["enable_execution"].append(execution)
+            window.execution_toggle = execution
+            controls.layout().addWidget(execution)
             layout.addWidget(controls)
 
             runtime = _card(window, "runtime")
@@ -529,6 +597,11 @@ class AutoZumaGuiWindow:
             layout.addStretch()
             layout.addWidget(data)
             return row
+
+        def _set_object_name(widget: QWidget, object_name: str) -> None:
+            widget.setObjectName(object_name)
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
 
         def _hotkey_row(
             window: _Window,

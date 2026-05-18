@@ -18,7 +18,7 @@ class WindowRect:
 
 
 class Win32CommandExecutor:
-    """Execute planned command steps against a Zuma window."""
+    """Execute planned command steps against a Zuma client-window frame."""
 
     def __init__(self, hwnd: int, rect: WindowRect, use_virtual: bool = False) -> None:
         self.hwnd = hwnd
@@ -54,7 +54,7 @@ class Win32CommandExecutor:
         click_delay: float,
     ) -> None:
         win32api, win32con, win32gui = _import_pywin32()
-        client_x, client_y = _screen_to_client(target, self.rect)
+        client_x, client_y = _client_target(target)
         lparam = win32api.MAKELONG(client_x, client_y)
         win32gui.SendMessage(self.hwnd, win32con.WM_MOUSEMOVE, 0, lparam)
         time.sleep(move_delay)
@@ -70,7 +70,7 @@ class Win32CommandExecutor:
         click_delay: float,
     ) -> None:
         win32api, _, _ = _import_pywin32()
-        safe_x, safe_y = _clamp_to_window(target, self.rect)
+        safe_x, safe_y = _clamp_client_target_to_screen(target, self.rect)
         win32api.SetCursorPos((safe_x, safe_y))
         time.sleep(move_delay)
         _send_mouse_input(_MouseFlag.LEFT_DOWN)
@@ -127,13 +127,15 @@ def _import_pywin32():
     return win32api, win32con, win32gui
 
 
-def _screen_to_client(target: Point, rect: WindowRect) -> tuple[int, int]:
-    return int(target.x - rect.left), int(target.y - rect.top)
+def _client_target(target: Point) -> tuple[int, int]:
+    return int(target.x), int(target.y)
 
 
-def _clamp_to_window(target: Point, rect: WindowRect) -> tuple[int, int]:
-    safe_x = int(max(rect.left + 10, min(rect.left + rect.width - 10, target.x)))
-    safe_y = int(max(rect.top + 10, min(rect.top + rect.height - 10, target.y)))
+def _clamp_client_target_to_screen(target: Point, rect: WindowRect) -> tuple[int, int]:
+    screen_x = rect.left + target.x
+    screen_y = rect.top + target.y
+    safe_x = int(max(rect.left + 10, min(rect.left + rect.width - 10, screen_x)))
+    safe_y = int(max(rect.top + 10, min(rect.top + rect.height - 10, screen_y)))
     return safe_x, safe_y
 
 

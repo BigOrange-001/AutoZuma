@@ -45,6 +45,7 @@ The current refactor has completed the foundation layers:
 - Pure static-runtime single-frame orchestrator for ROI, coins, mode, decisions, and runtime state.
 - Pure command execution plan generation for shoot, double-shoot, swap-shoot, swap-double-shoot, and UI click commands.
 - Minimal Win32 command executor behind an explicit side-effect boundary.
+- Win32 command executor maps captured client-frame command coordinates to physical screen coordinates, matching the prototype `rect.left + x`, `rect.top + y` execution behavior.
 - Host-facing static runtime adapter that converts pure single-frame runtime commands into execution plans and optionally dispatches them through a driver.
 - Static session shell for detecting static levels, initializing/resetting runtime state, periodic map redetection, and live one-frame capture/dispatch.
 - Long-running live loop scaffold with injectable clock/hotkey reader and F1/F2/F3 edge-triggered control.
@@ -52,8 +53,9 @@ The current refactor has completed the foundation layers:
 - F2-triggered debug evidence output for live static sessions.
 - UI template detection and prototype-style repeated UI click handling.
 - PySide6 GUI shell with reserved prototype/runtime parameter controls and dry-run live controller wiring.
+- Guarded GUI mouse-execution toggle that keeps dry-run as the default and requires an explicit visible switch before dispatching planned mouse commands.
 
-No GUI mouse-execution toggle, dynamic-background `space` handling, or multi-process/shared-memory orchestration has been done yet. A static live CLI exists and defaults to dry-run mode unless command execution is explicitly enabled.
+No dynamic-background `space` handling or multi-process/shared-memory orchestration has been done yet. Static live CLI and GUI both default to dry-run mode unless command execution is explicitly enabled.
 
 ## Important Paths
 
@@ -423,10 +425,11 @@ Behavior:
 
 - Provides `Win32CommandExecutor` for executing planned steps through physical `SendInput` or virtual/background window messages.
 - Provides `find_game_window()` for locating a visible game window and returning its client screen rect.
+- Accepts command targets in captured client-frame coordinates; physical mouse execution adds the window client rect offset before `SetCursorPos`, while virtual execution sends those client coordinates directly to the target window.
 - Preserves prototype click timings for shoot and UI-click actions.
 - Preserves prototype physical shot clamping inside the game client rect.
 - Preserves prototype virtual right-click behavior at the client-window center.
-- Remains an explicit side-effect adapter; it is not yet wired into live capture, hotkeys, UI-state detection, or the static runtime orchestrator.
+- Remains an explicit side-effect adapter.
 
 ### Window Capture
 
@@ -635,14 +638,15 @@ Behavior:
 - Supports `--config`, repeated `--set KEY=VALUE`, `--window-title`, `--fps`, `--max-iterations`, `--virtual-mouse/--no-virtual-mouse`, map redetection interval, and static level confidence.
 - Uses config `virtual_mouse` when the CLI does not explicitly override virtual mouse mode.
 - Supports `--debug-dir` for F2 debug snapshots.
-- Does not yet implement GUI controls, UI-state handling, `space`, or process orchestration.
+- Leaves GUI controls, dynamic-background `space`, and process orchestration outside the CLI slice.
 
-### GUI Shell Mockup
+### GUI Tuning Panel
 
 Files:
 
 - `src/autozuma/gui/schema.py`
 - `src/autozuma/gui/i18n.py`
+- `src/autozuma/gui/settings.py`
 - `src/autozuma/gui/controller.py`
 - `src/autozuma/gui/app.py`
 
@@ -654,14 +658,19 @@ Behavior:
 - Uses a tuning-first three-column layout: compact controls/status on the left, parameter tabs in the center, and preview/log placeholders on the right.
 - Reserves the prototype/runtime parameter surface across General, Normal, Rescue, and Endgame tabs.
 - Supports English/Chinese language switching for the GUI chrome while preserving raw config keys.
-- Arm/Safe/Snapshot controls are wired through `GuiRuntimeController`.
+- Arm/Safe/Snapshot controls are wired through `GuiRuntimeController` to the existing live static adapter.
 - Default GUI shortcuts preserve the prototype controls: F1 toggles Arm/Safe, F2 saves a snapshot, and F3 forces Safe.
+- GUI F1/F2/F3 handling also polls Win32 `GetAsyncKeyState`, matching the prototype global-hotkey behavior while the game window has focus.
 - GUI shortcuts are editable in the Hotkeys card and persisted to `config/gui_settings.json`.
 - `Load INI`, `Save Preset`, and `Reset Defaults` are wired for strategy/runtime parameter files.
-- GUI runtime wiring is intentionally dry-run only: it calls existing live static session frames with `execute_commands=False`.
+- GUI runtime wiring defaults to dry-run and calls existing live static session frames with `execute_commands=False`.
+- A visible `Enable mouse execution` checkbox can explicitly set `execute_commands=True`; the top status pill switches from `DRY RUN` to `EXECUTION ENABLED`.
+- The existing `virtual_mouse` runtime toggle is honored when execution is enabled, selecting prototype-style virtual/background window messages instead of physical cursor movement.
+- Event-log command lines now distinguish dry-run planning from dispatch: `shoot (planned)` means no click was sent; `shoot (executed/virtual)` or `shoot (executed/physical)` means the execution driver was called.
+- Snapshot frames force dry-run command handling even when mouse execution is enabled.
 - Snapshot reuses `FileDebugOutputSink`.
 - Runtime errors, including missing game windows, are caught at the GUI boundary and written to the event log.
-- Keeps mouse execution, process orchestration, and shared runtime state outside this GUI slice.
+- Keeps process orchestration and shared runtime state outside this GUI slice.
 - `tests/test_gui_schema.py` verifies the GUI schema reserves all loaded runtime config keys, including currently reserved prototype fields such as `soft_lock_ttl` and `predict_radius_th`.
 
 ### Debug Evidence Output
@@ -725,6 +734,16 @@ Last targeted GUI check:
 - `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_gui_schema.py tests\test_gui_i18n.py tests\test_gui_settings.py tests\test_runtime_config.py`: 18 passed
 - Offscreen PySide6 window construction smoke check passed.
 
+Last targeted GUI execution-toggle check:
+
+- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_gui_i18n.py tests\test_gui_schema.py tests\test_runtime_live.py`: 12 passed
+- `.venv\Scripts\python -m ruff check .`: passed
+
+Last targeted GUI global-hotkey check:
+
+- `.venv\Scripts\python -m pytest tests\test_control_hotkeys.py tests\test_gui_controller.py tests\test_gui_i18n.py tests\test_gui_schema.py`: 13 passed
+- Offscreen PySide6 window construction smoke check passed.
+
 Last targeted static session/capture check:
 
 - `.venv\Scripts\python -m pytest tests\test_runtime_live.py tests\test_runtime_session.py tests\test_control_capture.py`: 10 passed
@@ -744,13 +763,19 @@ Last targeted static-runtime check:
 
 ## Next Recommended Step
 
-The next clean step is to add a guarded GUI command-execution toggle, migrate dynamic-background `space` handling, or start the process orchestration layer, depending on which runtime path is more urgent.
+The next clean step is to migrate dynamic-background `space` handling or start the process orchestration layer, depending on which runtime path is more urgent.
 
 Suggested scope:
 
 - For `space`, add explicit dynamic-background detection/perception entry points without pretending it has a static background.
 - For orchestration, keep GUI/shared-state adapters outside pure perception and strategy modules.
 - Keep unrelated refactors out of the next slice.
+
+## Recent Commits
+
+- `3070195 Add GUI hotkeys and preset persistence`
+- `e524b62 Add GUI tuning panel dry-run bridge`
+- `bc6a68b Migrate debug and UI session handling`
 
 ## Design Rules To Preserve
 

@@ -6,7 +6,7 @@ from autozuma.core.models import Command, GameRoiResult, Point
 
 
 def map_command_to_screen(command: Command, roi_result: GameRoiResult) -> Command:
-    """Convert ROI-local command target points into screen-frame coordinates."""
+    """Convert ROI-local command target points into captured-frame coordinates."""
     return Command(
         command_type=command.command_type,
         primary_target=_offset_point(command.primary_target, roi_result.offset),
