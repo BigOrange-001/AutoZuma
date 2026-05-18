@@ -20,6 +20,7 @@ class GuiHotkeySettings:
 class GuiSettings:
     """Settings that are not part of strategy runtime values."""
 
+    language: str = "zh"
     hotkeys: GuiHotkeySettings = GuiHotkeySettings()
 
 
@@ -37,7 +38,11 @@ def load_gui_settings(path: Path | str | None = None) -> GuiSettings:
     data = json.loads(settings_path.read_text(encoding="utf-8"))
     hotkey_data = data.get("hotkeys", {})
     defaults = GuiHotkeySettings()
+    language = str(data.get("language", GuiSettings().language))
+    if language not in {"en", "zh"}:
+        language = GuiSettings().language
     return GuiSettings(
+        language=language,
         hotkeys=GuiHotkeySettings(
             toggle_arm=str(hotkey_data.get("toggle_arm", defaults.toggle_arm)),
             snapshot=str(hotkey_data.get("snapshot", defaults.snapshot)),

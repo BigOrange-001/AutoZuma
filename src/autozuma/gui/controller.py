@@ -7,7 +7,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from time import time
 
-from autozuma.runtime.debug import FileDebugOutputSink
+import numpy as np
+
+from autozuma.runtime.debug import (
+    DebugOutputResult,
+    FileDebugOutputSink,
+    render_static_session_overlay,
+)
 from autozuma.runtime.host import StaticHostFrameParams
 from autozuma.runtime.live import (
     LiveStaticSessionContext,
@@ -43,6 +49,8 @@ class GuiRuntimeStep:
     message: str
     commands_enabled: bool = False
     mouse_mode: str = "virtual"
+    mode: str | None = None
+    preview_bgr: np.ndarray | None = None
 
 
 class GuiRuntimeController:
@@ -89,13 +97,16 @@ class GuiRuntimeController:
         if self._context is None:
             self._context = self._context_factory()
 
+        preview_sink = _GuiPreviewSink(
+            file_sink=FileDebugOutputSink(settings.debug_dir) if debug_snapshot else None
+        )
         commands_enabled = settings.execute_commands and self.is_armed and not debug_snapshot
         result = self._frame_runner(
             context=self._context,
             state=self.state.session,
             current_time=self._clock(),
             params=_live_params(settings, execute_commands=commands_enabled),
-            debug_output=FileDebugOutputSink(settings.debug_dir) if debug_snapshot else None,
+            debug_output=preview_sink,
         )
         self.state = LiveLoopState(session=result.state, hotkeys=self.state.hotkeys)
         command_type = _command_type_from_result(result)
@@ -106,6 +117,8 @@ class GuiRuntimeController:
             message="snapshot" if debug_snapshot else "frame",
             commands_enabled=commands_enabled,
             mouse_mode="virtual" if bool(settings.raw_values.get("virtual_mouse", 0.0)) else "physical",
+            mode=_mode_from_result(result),
+            preview_bgr=preview_sink.preview_bgr,
         )
 
 
@@ -138,3 +151,38 @@ def _command_type_from_result(result: object) -> str:
         return ui_result.automation.command.command_type.value
 
     return "NO_OP"
+
+
+def _mode_from_result(result: object) -> str | None:
+    host_result = getattr(result, "host_result", None)
+    if host_result is None:
+        state = getattr(result, "state", None)
+        phase = getattr(state, "phase", None)
+        return getattr(phase, "value", None)
+
+    mode_update = getattr(host_result.runtime, "mode_update", None)
+    mode_state = getattr(mode_update, "state", None)
+    mode = getattr(mode_state, "mode", None)
+    return getattr(mode, "value", None)
+
+
+class _GuiPreviewSink:
+    def __init__(self, file_sink: FileDebugOutputSink | None = None) -> None:
+        self._file_sink = file_sink
+        self.preview_bgr: np.ndarray | None = None
+
+    def write(
+        self,
+        *,
+        frame_bgr: np.ndarray,
+        session_result: object,
+        current_time: float,
+    ) -> DebugOutputResult | None:
+        self.preview_bgr = render_static_session_overlay(frame_bgr, session_result)
+        if self._file_sink is None:
+            return None
+        return self._file_sink.write(
+            frame_bgr=frame_bgr,
+            session_result=session_result,
+            current_time=current_time,
+        )

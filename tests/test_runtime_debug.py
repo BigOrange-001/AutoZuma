@@ -15,7 +15,11 @@ from autozuma.core.models import (
     WorldState,
 )
 from autozuma.decision.static_frame import StaticFrameDecisionResult
-from autozuma.runtime.debug import FileDebugOutputSink, build_debug_summary
+from autozuma.runtime.debug import (
+    FileDebugOutputSink,
+    build_debug_summary,
+    render_static_session_overlay,
+)
 from autozuma.runtime.modes import RuntimeModeUpdate, initial_runtime_mode_state
 from autozuma.runtime.session import StaticSessionFrameResult, StaticSessionPhase, StaticSessionState
 
@@ -67,6 +71,15 @@ def test_build_debug_summary_stays_json_serializable():
     summary = build_debug_summary(_playing_session_result(), current_time=12.0)
 
     json.dumps(summary)
+
+
+def test_render_static_session_overlay_pastes_roi_overlay_into_full_frame():
+    frame = np.zeros((30, 40, 3), dtype=np.uint8)
+
+    overlay = render_static_session_overlay(frame, _playing_session_result())
+
+    assert overlay.shape == frame.shape
+    assert int(overlay.sum()) > 0
 
 
 def _playing_session_result():

@@ -118,6 +118,67 @@ Validation:
 - `.venv\Scripts\python -m pytest tests\test_win32_executor.py tests\test_control_execution.py tests\test_control_commands.py tests\test_runtime_live.py tests\test_runtime_host.py tests\test_gui_controller.py` passed: 24 tests.
 - `.venv\Scripts\python -m ruff check .` passed.
 
+### GUI Live Overlay Preview
+
+Replaced the disconnected GUI preview placeholder with a live in-memory overlay
+preview.
+
+Changed:
+
+- Added `render_static_session_overlay()` in `src/autozuma/runtime/debug.py`.
+- `GuiRuntimeController` now passes a preview sink into the live adapter every
+  processed frame.
+- Snapshot frames still write debug evidence through `FileDebugOutputSink`, while
+  normal frames only keep the preview image in memory.
+- `GuiRuntimeStep` carries the latest preview image and runtime mode.
+- The GUI Preview panel renders the latest overlay with `QImage`/`QPixmap`.
+- Removed the stale title-bar text that said the preview was not connected.
+
+Behavior:
+
+- During detection, the preview shows the captured frame with map detection text
+  when available.
+- During gameplay, the preview shows the full captured frame with ROI overlay
+  pasted back into place.
+- The overlay includes detected balls, selected target, secondary target,
+  command crosshair, launcher next-ball marker, and UI click target when present.
+- The event log remains separate and continues to show planned/executed command
+  status.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_runtime_debug.py tests\test_runtime_live.py tests\test_runtime_session.py` passed: 21 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- Offscreen PySide6 window construction smoke check passed.
+
+### GUI Chinese Default And Language Persistence
+
+Changed the GUI language behavior to match the current operating workflow.
+
+Changed:
+
+- `GuiSettings` now includes a `language` field.
+- The default GUI language is `zh`.
+- The language selector initializes from `config/gui_settings.json`.
+- Changing the language immediately saves the new GUI setting.
+- Reset Defaults returns the GUI language to Chinese.
+- `tests/test_gui_settings.py` covers default language, round-trip persistence,
+  and invalid-language fallback.
+
+Behavior:
+
+- First launch uses Chinese GUI chrome when no GUI settings file exists.
+- Existing settings files without a language field also fall back to Chinese.
+- English remains selectable from the language drop-down.
+- Strategy/runtime config keys remain untranslated.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest tests\test_gui_settings.py tests\test_gui_i18n.py tests\test_gui_controller.py tests\test_runtime_debug.py` passed: 15 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- Offscreen PySide6 window construction smoke check confirmed `zh` as the
+  default language.
+
 ### GUI Tuning Panel Baseline
 
 Added the first PySide6 GUI tuning panel and wired it to the existing static

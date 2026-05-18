@@ -45,7 +45,7 @@ class AutoZumaGuiWindow:
 
     def __new__(cls):
         from PySide6.QtCore import QTimer, Qt
-        from PySide6.QtGui import QFont, QKeySequence, QShortcut
+        from PySide6.QtGui import QFont, QImage, QKeySequence, QPixmap, QShortcut
         from PySide6.QtWidgets import (
             QCheckBox,
             QComboBox,
@@ -73,15 +73,17 @@ class AutoZumaGuiWindow:
                 self.resize(1180, 780)
                 self.setMinimumSize(980, 680)
                 self.setStyleSheet(_STYLE)
-                self.language = "en"
                 self.controller = GuiRuntimeController()
                 self.runtime_values = load_runtime_values()
                 self.gui_settings = load_gui_settings()
+                self.language = self.gui_settings.language
                 self.parameter_controls: dict[str, QWidget] = {}
                 self.hotkey_controls: dict[str, QKeySequenceEdit] = {}
                 self.shortcuts: dict[str, QShortcut] = {}
                 self.status_values: dict[str, QLabel] = {}
                 self.execution_toggle: QCheckBox | None = None
+                self.preview_label: QLabel | None = None
+                self.language_selector: QComboBox | None = None
                 self.hotkey_state = HotkeyControlState()
                 self.hotkey_reader = Win32HotkeyReader()
                 self.localized_widgets: dict[str, list[QWidget]] = defaultdict(list)
@@ -130,6 +132,7 @@ class AutoZumaGuiWindow:
                 if language in SUPPORTED_LANGUAGES:
                     self.language = language
                     self._retranslate()
+                    self._save_gui_settings()
 
             def _retranslate(self) -> None:
                 self.setWindowTitle(self._t("app_title"))
@@ -201,6 +204,9 @@ class AutoZumaGuiWindow:
 
                 self._set_status("level", result.level_id or "none")
                 self._set_status("command", result.command_type)
+                self._set_status("mode", result.mode or "detecting")
+                if result.preview_bgr is not None:
+                    self._set_preview(result.preview_bgr)
                 dispatch = (
                     f"executed/{result.mouse_mode}"
                     if result.commands_enabled and result.command_type.lower() != "no_op"
@@ -271,7 +277,7 @@ class AutoZumaGuiWindow:
                     return
                 try:
                     save_runtime_values_to_ini(path, self._current_values())
-                    self._save_gui_hotkeys()
+                    self._save_gui_settings()
                     self._append_log(f"saved preset: {path}")
                 except Exception as exc:  # noqa: BLE001 - GUI boundary reports file failures.
                     self._append_log(f"save failed: {exc}")
@@ -280,9 +286,21 @@ class AutoZumaGuiWindow:
                 self.runtime_values = dict(DEFAULT_RUNTIME_VALUES)
                 self._apply_runtime_values(self.runtime_values)
                 self.gui_settings = GuiSettings()
+                self.language = self.gui_settings.language
+                self._apply_language_setting()
                 self._apply_hotkey_settings(self.gui_settings.hotkeys)
-                self._save_gui_hotkeys()
+                self._save_gui_settings()
                 self._append_log("reset defaults")
+
+            def _apply_language_setting(self) -> None:
+                if self.language_selector is None:
+                    return
+                index = self.language_selector.findData(self.language)
+                if index >= 0:
+                    self.language_selector.blockSignals(True)
+                    self.language_selector.setCurrentIndex(index)
+                    self.language_selector.blockSignals(False)
+                self._retranslate()
 
             def _apply_runtime_values(self, values: dict[str, float]) -> None:
                 for key, value in values.items():
@@ -303,8 +321,9 @@ class AutoZumaGuiWindow:
                         control.setKeySequence(QKeySequence(key_sequence))
                 self._install_shortcuts()
 
-            def _save_gui_hotkeys(self) -> None:
+            def _save_gui_settings(self) -> None:
                 self.gui_settings = GuiSettings(
+                    language=self.language,
                     hotkeys=GuiHotkeySettings(
                         toggle_arm=self._hotkey_text("toggle_arm"),
                         snapshot=self._hotkey_text("snapshot"),
@@ -343,6 +362,19 @@ class AutoZumaGuiWindow:
                 if label is not None:
                     label.setText(value)
 
+            def _set_preview(self, image_bgr) -> None:
+                if self.preview_label is None:
+                    return
+                pixmap = _bgr_to_pixmap(image_bgr)
+                target_size = self.preview_label.size()
+                if target_size.width() > 0 and target_size.height() > 0:
+                    pixmap = pixmap.scaled(
+                        target_size,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                self.preview_label.setPixmap(pixmap)
+
             def _append_log(self, line: str) -> None:
                 self.log_lines.append(line)
                 self.log_lines = self.log_lines[-40:]
@@ -364,9 +396,6 @@ class AutoZumaGuiWindow:
             title = window._localized_label("app_title", "AppTitle")
             title.setObjectName("AppTitle")
             layout.addWidget(title)
-
-            status = window._localized_label("preview_status", "Muted")
-            layout.addWidget(status)
             layout.addStretch()
 
             for text, object_name in (
@@ -387,9 +416,13 @@ class AutoZumaGuiWindow:
             language = QComboBox()
             language.addItem("English", "en")
             language.addItem("中文", "zh")
+            index = language.findData(window.language)
+            if index >= 0:
+                language.setCurrentIndex(index)
             language.currentIndexChanged.connect(
                 lambda: window._set_language(language.currentData())
             )
+            window.language_selector = language
             layout.addWidget(language)
             return bar
 
@@ -471,11 +504,13 @@ class AutoZumaGuiWindow:
             layout.setSpacing(12)
 
             preview = _card(window, "preview")
-            placeholder = window._localized_label("preview_placeholder")
+            placeholder = QLabel()
             placeholder.setObjectName("Preview")
             placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            placeholder.setMinimumHeight(210)
+            placeholder.setText(window._t("preview_placeholder"))
+            placeholder.setMinimumHeight(300)
             placeholder.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            window.preview_label = placeholder
             preview.layout().addWidget(placeholder, 1)
             layout.addWidget(preview, 1)
 
@@ -603,6 +638,18 @@ class AutoZumaGuiWindow:
             widget.style().unpolish(widget)
             widget.style().polish(widget)
 
+        def _bgr_to_pixmap(image_bgr) -> QPixmap:
+            rgb = image_bgr[:, :, ::-1].copy()
+            height, width, channels = rgb.shape
+            qimage = QImage(
+                rgb.data,
+                width,
+                height,
+                channels * width,
+                QImage.Format.Format_RGB888,
+            ).copy()
+            return QPixmap.fromImage(qimage)
+
         def _hotkey_row(
             window: _Window,
             label_key: str,
@@ -614,7 +661,7 @@ class AutoZumaGuiWindow:
             layout.setContentsMargins(0, 0, 0, 0)
             label = window._localized_label(label_key, "Muted")
             edit = QKeySequenceEdit(QKeySequence(value))
-            edit.editingFinished.connect(window._save_gui_hotkeys)
+            edit.editingFinished.connect(window._save_gui_settings)
             window.hotkey_controls[name] = edit
             layout.addWidget(label)
             layout.addStretch()

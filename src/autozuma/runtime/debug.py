@@ -149,6 +149,48 @@ def render_static_decision_overlay(decision: StaticFrameDecisionResult) -> np.nd
     return overlay
 
 
+def render_static_session_overlay(
+    frame_bgr: np.ndarray,
+    session_result: StaticSessionFrameResult,
+) -> np.ndarray:
+    """Render a full captured-frame overlay for live preview."""
+    overlay = frame_bgr.copy()
+    decision = _decision_result(session_result)
+    if decision is not None:
+        _paste_decision_roi_overlay(overlay, decision)
+        _draw_command_targets(overlay, decision.screen_command)
+
+    if session_result.ui_result is not None:
+        detection = session_result.ui_result.automation.detection_result
+        if detection is not None:
+            target = (int(round(detection.target.x)), int(round(detection.target.y)))
+            cv2.circle(overlay, target, 12, (0, 165, 255), 2, lineType=cv2.LINE_AA)
+            cv2.putText(
+                overlay,
+                detection.template_id,
+                (target[0] + 12, target[1] - 12),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 165, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+    if session_result.detection_result is not None:
+        detection = session_result.detection_result
+        cv2.putText(
+            overlay,
+            f"{detection.level_id} {detection.confidence:.2f}",
+            (12, 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+    return overlay
+
+
 def _host_summary(session_result: StaticSessionFrameResult) -> dict[str, object]:
     host_result = session_result.host_result
     if host_result is None:
@@ -275,6 +317,54 @@ def _point_summary(point: Point | None) -> dict[str, float] | None:
     if point is None:
         return None
     return {"x": float(point.x), "y": float(point.y)}
+
+
+def _paste_decision_roi_overlay(
+    frame_overlay: np.ndarray,
+    decision: StaticFrameDecisionResult,
+) -> None:
+    roi_overlay = render_static_decision_overlay(decision)
+    offset = decision.roi_result.offset
+    left = int(round(offset.x))
+    top = int(round(offset.y))
+    height, width = roi_overlay.shape[:2]
+    frame_height, frame_width = frame_overlay.shape[:2]
+
+    x1 = max(0, left)
+    y1 = max(0, top)
+    x2 = min(frame_width, left + width)
+    y2 = min(frame_height, top + height)
+    if x1 >= x2 or y1 >= y2:
+        return
+
+    roi_x1 = x1 - left
+    roi_y1 = y1 - top
+    roi_x2 = roi_x1 + (x2 - x1)
+    roi_y2 = roi_y1 + (y2 - y1)
+    frame_overlay[y1:y2, x1:x2] = roi_overlay[roi_y1:roi_y2, roi_x1:roi_x2]
+    cv2.rectangle(
+        frame_overlay,
+        (x1, y1),
+        (x2 - 1, y2 - 1),
+        (0, 255, 255),
+        1,
+        lineType=cv2.LINE_AA,
+    )
+
+
+def _draw_command_targets(overlay: np.ndarray, command: Command) -> None:
+    if command.primary_target is not None:
+        _draw_crosshair(overlay, command.primary_target, (0, 0, 255))
+    if command.secondary_target is not None:
+        _draw_crosshair(overlay, command.secondary_target, (255, 0, 255))
+
+
+def _draw_crosshair(overlay: np.ndarray, point: Point, color: tuple[int, int, int]) -> None:
+    x = int(round(point.x))
+    y = int(round(point.y))
+    cv2.circle(overlay, (x, y), 11, color, 2, lineType=cv2.LINE_AA)
+    cv2.line(overlay, (x - 16, y), (x + 16, y), color, 1, lineType=cv2.LINE_AA)
+    cv2.line(overlay, (x, y - 16), (x, y + 16), color, 1, lineType=cv2.LINE_AA)
 
 
 def _write_bgr_image(path: Path, image_bgr: np.ndarray) -> None:

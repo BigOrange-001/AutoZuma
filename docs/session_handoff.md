@@ -657,7 +657,7 @@ Behavior:
 - Builds a dark operations-console style tuning panel inspired by the newer reference UI.
 - Uses a tuning-first three-column layout: compact controls/status on the left, parameter tabs in the center, and preview/log placeholders on the right.
 - Reserves the prototype/runtime parameter surface across General, Normal, Rescue, and Endgame tabs.
-- Supports English/Chinese language switching for the GUI chrome while preserving raw config keys.
+- Defaults to Chinese GUI chrome, supports English/Chinese language switching while preserving raw config keys, and persists the selected language in `config/gui_settings.json`.
 - Arm/Safe/Snapshot controls are wired through `GuiRuntimeController` to the existing live static adapter.
 - Default GUI shortcuts preserve the prototype controls: F1 toggles Arm/Safe, F2 saves a snapshot, and F3 forces Safe.
 - GUI F1/F2/F3 handling also polls Win32 `GetAsyncKeyState`, matching the prototype global-hotkey behavior while the game window has focus.
@@ -668,6 +668,8 @@ Behavior:
 - The existing `virtual_mouse` runtime toggle is honored when execution is enabled, selecting prototype-style virtual/background window messages instead of physical cursor movement.
 - Event-log command lines now distinguish dry-run planning from dispatch: `shoot (planned)` means no click was sent; `shoot (executed/virtual)` or `shoot (executed/physical)` means the execution driver was called.
 - Snapshot frames force dry-run command handling even when mouse execution is enabled.
+- The previous disconnected preview placeholder has been replaced with a live overlay preview.
+- The GUI preview reuses the runtime debug overlay renderer in memory: detected entities, selected target, secondary target, command crosshair, UI target, and map detection text are rendered onto the captured frame without writing files.
 - Snapshot reuses `FileDebugOutputSink`.
 - Runtime errors, including missing game windows, are caught at the GUI boundary and written to the event log.
 - Keeps process orchestration and shared runtime state outside this GUI slice.
@@ -743,6 +745,13 @@ Last targeted GUI global-hotkey check:
 
 - `.venv\Scripts\python -m pytest tests\test_control_hotkeys.py tests\test_gui_controller.py tests\test_gui_i18n.py tests\test_gui_schema.py`: 13 passed
 - Offscreen PySide6 window construction smoke check passed.
+
+Last targeted GUI preview/language check:
+
+- `.venv\Scripts\python -m pytest tests\test_gui_settings.py tests\test_gui_i18n.py tests\test_gui_controller.py tests\test_runtime_debug.py`: 15 passed
+- `.venv\Scripts\python -m pytest tests\test_gui_controller.py tests\test_runtime_debug.py tests\test_runtime_live.py tests\test_runtime_session.py`: 21 passed
+- `.venv\Scripts\python -m ruff check .`: passed
+- Offscreen PySide6 Chinese-default window construction smoke check passed.
 
 Last targeted static session/capture check:
 

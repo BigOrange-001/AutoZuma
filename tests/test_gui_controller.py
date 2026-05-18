@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 
+import numpy as np
+
 from autozuma.core.models import CommandType
 from autozuma.gui.controller import GuiRuntimeController, GuiRuntimeSettings
-from autozuma.runtime.session import StaticSessionState
+from autozuma.runtime.session import StaticSessionFrameResult, StaticSessionState
 
 
 def test_gui_controller_stays_idle_while_safe():
@@ -105,6 +107,30 @@ def test_gui_controller_snapshot_forces_dry_run_even_when_execution_is_enabled()
     assert calls["frame"]["params"].session.host.execute_commands is False
     assert result.commands_enabled is False
     assert result.message == "snapshot"
+
+
+def test_gui_controller_returns_live_preview_frame():
+    frame = np.full((4, 5, 3), 9, dtype=np.uint8)
+    frame_result = StaticSessionFrameResult(state=StaticSessionState(level_id=None))
+
+    def frame_runner(**kwargs):
+        kwargs["debug_output"].write(
+            frame_bgr=frame,
+            session_result=frame_result,
+            current_time=10.0,
+        )
+        return frame_result
+
+    controller = GuiRuntimeController(
+        context_factory=lambda: "context",
+        frame_runner=frame_runner,
+    )
+    controller.arm()
+
+    result = controller.step(GuiRuntimeSettings(raw_values={}))
+
+    assert result.preview_bgr is not None
+    assert np.array_equal(result.preview_bgr, frame)
 
 
 def test_gui_controller_passes_debug_sink_for_snapshot():
