@@ -6,6 +6,8 @@ import configparser
 from collections.abc import Mapping
 from pathlib import Path
 
+from autozuma.project_paths import project_path
+
 
 DEFAULT_RUNTIME_VALUES: dict[str, float] = {
     "n_fire_cooldown": 0.44,
@@ -55,7 +57,7 @@ DEFAULT_RUNTIME_VALUES: dict[str, float] = {
 
 def default_config_path() -> Path:
     """Return the bundled prototype-compatible strategy config path when present."""
-    return Path(__file__).resolve().parents[3] / "config" / "strategy_v1_plus.ini"
+    return project_path("config", "strategy_v1_plus.ini")
 
 
 def load_runtime_values(

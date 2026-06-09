@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 from collections import defaultdict
+from dataclasses import replace
+from functools import partial
 
 from autozuma.gui.controller import GuiRuntimeController, GuiRuntimeSettings
 from autozuma.gui.schema import (
@@ -19,8 +21,12 @@ from autozuma.gui.settings import (
     load_gui_settings,
     save_gui_settings,
 )
-from autozuma.control.hotkeys import HotkeyControlState, Win32HotkeyReader, poll_hotkeys
-from autozuma.runtime.config import DEFAULT_RUNTIME_VALUES, load_runtime_values, save_runtime_values_to_ini
+from autozuma.runtime.config import (
+    DEFAULT_RUNTIME_VALUES,
+    default_config_path,
+    load_runtime_values,
+    save_runtime_values_to_ini,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,6 +55,8 @@ class AutoZumaGuiWindow:
         from PySide6.QtWidgets import (
             QCheckBox,
             QComboBox,
+            QDialog,
+            QDialogButtonBox,
             QDoubleSpinBox,
             QFrame,
             QGridLayout,
@@ -78,24 +86,20 @@ class AutoZumaGuiWindow:
                 self.gui_settings = load_gui_settings()
                 self.language = self.gui_settings.language
                 self.parameter_controls: dict[str, QWidget] = {}
-                self.hotkey_controls: dict[str, QKeySequenceEdit] = {}
+                self.parameter_labels: list[tuple[QLabel, GuiParameterDefinition]] = []
+                self.control_buttons: dict[str, tuple[QPushButton, str]] = {}
                 self.shortcuts: dict[str, QShortcut] = {}
                 self.status_values: dict[str, QLabel] = {}
-                self.execution_toggle: QCheckBox | None = None
                 self.preview_label: QLabel | None = None
                 self.language_selector: QComboBox | None = None
-                self.hotkey_state = HotkeyControlState()
-                self.hotkey_reader = Win32HotkeyReader()
                 self.localized_widgets: dict[str, list[QWidget]] = defaultdict(list)
+                self.localized_tooltips: dict[str, list[QWidget]] = defaultdict(list)
                 self.localized_tabs: list[tuple[QTabWidget, int, str]] = []
                 self.log_label: QLabel | None = None
                 self.log_lines: list[str] = []
                 self.timer = QTimer(self)
                 self.timer.setInterval(100)
                 self.timer.timeout.connect(self._tick)
-                self.hotkey_timer = QTimer(self)
-                self.hotkey_timer.setInterval(50)
-                self.hotkey_timer.timeout.connect(self._poll_global_hotkeys)
 
                 schema = build_gui_parameter_schema(self.runtime_values)
 
@@ -107,10 +111,8 @@ class AutoZumaGuiWindow:
                 layout.addWidget(_main_area(self, schema), 1)
                 self.setCentralWidget(root)
                 self._retranslate()
-                self._sync_execution_mode()
                 self._install_shortcuts()
-                self.hotkey_timer.start()
-                self._append_log("GUI connected in dry-run mode")
+                self._append_log("GUI connected")
 
             def _t(self, key: str) -> str:
                 return translate(self.language, key)
@@ -122,11 +124,21 @@ class AutoZumaGuiWindow:
                 self.localized_widgets[key].append(label)
                 return label
 
-            def _localized_button(self, key: str, object_name: str) -> QPushButton:
+            def _localized_button(
+                self,
+                key: str,
+                object_name: str,
+                tooltip_key: str | None = None,
+            ) -> QPushButton:
                 button = QPushButton()
                 button.setObjectName(object_name)
                 self.localized_widgets[key].append(button)
+                if tooltip_key is not None:
+                    self.localized_tooltips[tooltip_key].append(button)
                 return button
+
+            def _set_localized_tooltip(self, widget: QWidget, key: str) -> None:
+                self.localized_tooltips[key].append(widget)
 
             def _set_language(self, language: str) -> None:
                 if language in SUPPORTED_LANGUAGES:
@@ -139,9 +151,13 @@ class AutoZumaGuiWindow:
                 for key, widgets in self.localized_widgets.items():
                     for widget in widgets:
                         widget.setText(self._t(key))
+                for key, widgets in self.localized_tooltips.items():
+                    for widget in widgets:
+                        widget.setToolTip(self._t(key))
                 for tabs, index, key in self.localized_tabs:
                     tabs.setTabText(index, self._t(key))
-                self._sync_execution_mode()
+                self._sync_parameter_texts()
+                self._sync_control_button_texts()
                 if self.log_label is not None and not self.log_lines:
                     self.log_label.setText(
                         "16:55:03  "
@@ -152,11 +168,20 @@ class AutoZumaGuiWindow:
                         + self._t("log_disconnected")
                     )
 
+            def _sync_parameter_texts(self) -> None:
+                for label, parameter in self.parameter_labels:
+                    label.setText(parameter.display_label(self.language))
+                    label.setToolTip(parameter.display_description(self.language))
+
+            def _sync_control_button_texts(self) -> None:
+                for name, (button, text_key) in self.control_buttons.items():
+                    button.setText(_button_text(self._t(text_key), self._hotkey_text(name)))
+
             def _arm(self) -> None:
                 self.controller.arm()
                 self.timer.start()
                 self._set_status("state", "armed")
-                self._append_log(f"armed live loop ({self._execution_mode_text()})")
+                self._append_log("armed live loop")
 
             def _toggle_arm(self) -> None:
                 if self.controller.is_armed:
@@ -172,22 +197,6 @@ class AutoZumaGuiWindow:
 
             def _snapshot(self) -> None:
                 self._run_step(debug_snapshot=True)
-
-            def _poll_global_hotkeys(self) -> None:
-                try:
-                    poll_result = poll_hotkeys(self.hotkey_state, self.hotkey_reader)
-                except Exception as exc:  # noqa: BLE001 - GUI boundary reports hotkey failures.
-                    self.hotkey_timer.stop()
-                    self._append_log(f"global hotkeys unavailable: {exc}")
-                    return
-
-                self.hotkey_state = poll_result.state
-                if poll_result.events.toggled_arm:
-                    self._toggle_arm()
-                if poll_result.events.debug_requested:
-                    self._snapshot()
-                if poll_result.events.forced_safe:
-                    self._safe()
 
             def _tick(self) -> None:
                 self._run_step(debug_snapshot=False)
@@ -208,38 +217,14 @@ class AutoZumaGuiWindow:
                 if result.preview_bgr is not None:
                     self._set_preview(result.preview_bgr)
                 dispatch = (
-                    f"executed/{result.mouse_mode}"
+                    f"mouse/{result.mouse_mode}"
                     if result.commands_enabled and result.command_type.lower() != "no_op"
-                    else "planned"
+                    else "no mouse command"
                 )
                 self._append_log(f"{result.message}: {result.command_type} ({dispatch})")
 
             def _settings(self) -> GuiRuntimeSettings:
-                return GuiRuntimeSettings(
-                    raw_values=self._current_values(),
-                    execute_commands=self._execution_enabled(),
-                )
-
-            def _execution_enabled(self) -> bool:
-                return bool(self.execution_toggle is not None and self.execution_toggle.isChecked())
-
-            def _execution_mode_text(self) -> str:
-                return "execution enabled" if self._execution_enabled() else "dry-run"
-
-            def _set_execution_enabled(self, enabled: bool) -> None:
-                self._sync_execution_mode()
-                self._append_log("mouse execution enabled" if enabled else "dry-run mode enabled")
-
-            def _sync_execution_mode(self) -> None:
-                label = self.status_values.get("execution_mode")
-                if label is None:
-                    return
-                if self._execution_enabled():
-                    label.setText(self._t("execution_enabled"))
-                    _set_object_name(label, "DangerPill")
-                else:
-                    label.setText(self._t("dry_run"))
-                    _set_object_name(label, "InfoPill")
+                return GuiRuntimeSettings(raw_values=self._current_values())
 
             def _current_values(self) -> dict[str, float]:
                 values = dict(self.runtime_values)
@@ -254,7 +239,7 @@ class AutoZumaGuiWindow:
                 path, _ = QFileDialog.getOpenFileName(
                     self,
                     "Load strategy INI",
-                    "config",
+                    str(default_config_path().parent),
                     "INI files (*.ini);;All files (*)",
                 )
                 if not path:
@@ -270,7 +255,7 @@ class AutoZumaGuiWindow:
                 path, _ = QFileDialog.getSaveFileName(
                     self,
                     "Save strategy preset",
-                    "config/strategy_gui_saved.ini",
+                    str(default_config_path().parent / "strategy_gui_saved.ini"),
                     "INI files (*.ini);;All files (*)",
                 )
                 if not path:
@@ -311,33 +296,65 @@ class AutoZumaGuiWindow:
                         control.setValue(float(value))
 
             def _apply_hotkey_settings(self, hotkeys: GuiHotkeySettings) -> None:
-                for name, key_sequence in (
-                    ("toggle_arm", hotkeys.toggle_arm),
-                    ("snapshot", hotkeys.snapshot),
-                    ("safe", hotkeys.safe),
-                ):
-                    control = self.hotkey_controls.get(name)
-                    if control is not None:
-                        control.setKeySequence(QKeySequence(key_sequence))
                 self._install_shortcuts()
+                self._sync_control_button_texts()
 
             def _save_gui_settings(self) -> None:
-                self.gui_settings = GuiSettings(
-                    language=self.language,
-                    hotkeys=GuiHotkeySettings(
-                        toggle_arm=self._hotkey_text("toggle_arm"),
-                        snapshot=self._hotkey_text("snapshot"),
-                        safe=self._hotkey_text("safe"),
-                    )
-                )
                 save_gui_settings(self.gui_settings)
                 self._install_shortcuts()
+                self._sync_control_button_texts()
 
             def _hotkey_text(self, name: str) -> str:
-                control = self.hotkey_controls.get(name)
-                if control is None:
-                    return getattr(GuiHotkeySettings(), name)
-                return control.keySequence().toString() or getattr(GuiHotkeySettings(), name)
+                return getattr(self.gui_settings.hotkeys, name)
+
+            def _set_hotkey_text(self, name: str, key_text: str) -> None:
+                defaults = GuiHotkeySettings()
+                normalized = key_text or getattr(defaults, name)
+                self.gui_settings = replace(
+                    self.gui_settings,
+                    hotkeys=replace(self.gui_settings.hotkeys, **{name: normalized}),
+                )
+                self._save_gui_settings()
+                self._append_log(f"shortcut updated: {name} -> {normalized}")
+
+            def _edit_hotkey(self, name: str, _point=None) -> None:
+                dialog = QDialog(self)
+                dialog.setWindowTitle(self._t("edit_shortcut_title"))
+                layout = QVBoxLayout(dialog)
+                layout.setContentsMargins(14, 14, 14, 14)
+                layout.setSpacing(10)
+
+                hint = QLabel(self._t("edit_shortcut_hint"))
+                hint.setObjectName("Muted")
+                layout.addWidget(hint)
+
+                edit = QKeySequenceEdit(QKeySequence(self._hotkey_text(name)))
+                layout.addWidget(edit)
+                original_text = ""
+                button_entry = self.control_buttons.get(name)
+                if button_entry is not None:
+                    button, text_key = button_entry
+                    original_text = button.text()
+
+                    def _preview_shortcut(key_sequence: QKeySequence) -> None:
+                        preview = key_sequence.toString(QKeySequence.SequenceFormat.NativeText)
+                        button.setText(_button_text(self._t(text_key), preview))
+
+                    edit.keySequenceChanged.connect(_preview_shortcut)
+
+                buttons = QDialogButtonBox(
+                    QDialogButtonBox.StandardButton.Ok
+                    | QDialogButtonBox.StandardButton.Cancel
+                )
+                buttons.accepted.connect(dialog.accept)
+                buttons.rejected.connect(dialog.reject)
+                layout.addWidget(buttons)
+
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    key_text = edit.keySequence().toString(QKeySequence.SequenceFormat.NativeText)
+                    self._set_hotkey_text(name, key_text)
+                elif button_entry is not None:
+                    button.setText(original_text)
 
             def _install_shortcuts(self) -> None:
                 for shortcut in self.shortcuts.values():
@@ -350,7 +367,7 @@ class AutoZumaGuiWindow:
                     ("safe", self._safe),
                 ):
                     key_text = self._hotkey_text(name)
-                    if key_text.upper() in {"F1", "F2", "F3"}:
+                    if not key_text:
                         continue
                     shortcut = QShortcut(QKeySequence(key_text), self)
                     shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
@@ -406,16 +423,12 @@ class AutoZumaGuiWindow:
                 pill.setObjectName(object_name)
                 layout.addWidget(pill)
 
-            execution_pill = window._localized_label("dry_run")
-            execution_pill.setObjectName("InfoPill")
-            window.status_values["execution_mode"] = execution_pill
-            layout.addWidget(execution_pill)
-
             language_label = window._localized_label("language", "Muted")
             layout.addWidget(language_label)
             language = QComboBox()
             language.addItem("English", "en")
             language.addItem("中文", "zh")
+            window._set_localized_tooltip(language, "tip_language")
             index = language.findData(window.language)
             if index >= 0:
                 language.setCurrentIndex(index)
@@ -444,22 +457,25 @@ class AutoZumaGuiWindow:
             layout.setSpacing(12)
 
             controls = _card(window, "controls")
-            arm = window._localized_button("arm", "PrimaryButton")
-            safe = window._localized_button("safe_button", "GhostButton")
-            snapshot = window._localized_button("snapshot", "GhostButton")
+            arm = window._localized_button("arm", "ControlPrimaryButton", "tip_arm")
+            safe = window._localized_button("safe_button", "ControlButton", "tip_safe")
+            snapshot = window._localized_button("snapshot", "ControlButton", "tip_snapshot")
+            window.control_buttons["toggle_arm"] = (arm, "arm")
+            window.control_buttons["safe"] = (safe, "safe_button")
+            window.control_buttons["snapshot"] = (snapshot, "snapshot")
             arm.clicked.connect(window._arm)
             safe.clicked.connect(window._safe)
             snapshot.clicked.connect(window._snapshot)
-            controls.layout().addWidget(arm)
-            controls.layout().addWidget(safe)
-            controls.layout().addWidget(snapshot)
-            execution = QCheckBox()
-            execution.setObjectName("ExecutionToggle")
-            execution.setToolTip("Allow the GUI loop to dispatch planned mouse commands.")
-            execution.toggled.connect(window._set_execution_enabled)
-            window.localized_widgets["enable_execution"].append(execution)
-            window.execution_toggle = execution
-            controls.layout().addWidget(execution)
+            action_row = QWidget()
+            action_layout = QHBoxLayout(action_row)
+            action_layout.setContentsMargins(0, 0, 0, 0)
+            action_layout.setSpacing(8)
+            for name, button in (("toggle_arm", arm), ("safe", safe), ("snapshot", snapshot)):
+                button.setFixedSize(68, 68)
+                button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                button.customContextMenuRequested.connect(partial(window._edit_hotkey, name))
+                action_layout.addWidget(button)
+            controls.layout().addWidget(action_row)
             layout.addWidget(controls)
 
             runtime = _card(window, "runtime")
@@ -479,19 +495,10 @@ class AutoZumaGuiWindow:
                 ("save_preset", window._save_preset),
                 ("reset_defaults", window._reset_defaults),
             ):
-                button = window._localized_button(text, "GhostButton")
+                button = window._localized_button(text, "GhostButton", f"tip_{text}")
                 button.clicked.connect(callback)
                 presets.layout().addWidget(button)
             layout.addWidget(presets)
-
-            hotkeys = _card(window, "hotkeys")
-            for label, name, value in (
-                ("toggle_arm", "toggle_arm", window.gui_settings.hotkeys.toggle_arm),
-                ("snapshot_key", "snapshot", window.gui_settings.hotkeys.snapshot),
-                ("safe_key", "safe", window.gui_settings.hotkeys.safe),
-            ):
-                hotkeys.layout().addWidget(_hotkey_row(window, label, name, value))
-            layout.addWidget(hotkeys)
 
             layout.addStretch()
             return panel
@@ -571,9 +578,10 @@ class AutoZumaGuiWindow:
             layout.setColumnStretch(0, 3)
             layout.setColumnStretch(1, 2)
 
-            label = QLabel(parameter.label)
+            label = QLabel(parameter.display_label(window.language))
             label.setObjectName("ParamLabel")
-            label.setToolTip(parameter.description)
+            label.setToolTip(parameter.display_description(window.language))
+            window.parameter_labels.append((label, parameter))
             layout.addWidget(label, 0, 0)
 
             key = QLabel(parameter.key)
@@ -650,23 +658,12 @@ class AutoZumaGuiWindow:
             ).copy()
             return QPixmap.fromImage(qimage)
 
-        def _hotkey_row(
-            window: _Window,
-            label_key: str,
-            name: str,
-            value: str,
-        ) -> QWidget:
-            row = QWidget()
-            layout = QHBoxLayout(row)
-            layout.setContentsMargins(0, 0, 0, 0)
-            label = window._localized_label(label_key, "Muted")
-            edit = QKeySequenceEdit(QKeySequence(value))
-            edit.editingFinished.connect(window._save_gui_settings)
-            window.hotkey_controls[name] = edit
-            layout.addWidget(label)
-            layout.addStretch()
-            layout.addWidget(edit)
-            return row
+        def _button_text(label: str, hotkey: str) -> str:
+            shortcut = hotkey.strip() or "-"
+            if len(shortcut) > 10 and "+" in shortcut:
+                parts = shortcut.split("+")
+                shortcut = "+".join(parts[:-1]) + "\n+" + parts[-1]
+            return f"{label}\n({shortcut})"
 
         return _Window()
 
@@ -730,6 +727,7 @@ QPushButton#PrimaryButton {
     border: 0;
     border-radius: 16px;
     padding: 9px 14px;
+    min-height: 20px;
     font-weight: 800;
 }
 QPushButton#GhostButton {
@@ -737,9 +735,27 @@ QPushButton#GhostButton {
     border: 1px solid #737b8c;
     border-radius: 16px;
     padding: 8px 14px;
+    min-height: 20px;
     font-weight: 700;
 }
-QPushButton#GhostButton:hover, QPushButton#PrimaryButton:hover {
+QPushButton#ControlPrimaryButton {
+    background: #756dd6;
+    border: 0;
+    border-radius: 7px;
+    padding: 0;
+    font-size: 12px;
+    font-weight: 800;
+}
+QPushButton#ControlButton {
+    background: #282c32;
+    border: 1px solid #737b8c;
+    border-radius: 7px;
+    padding: 0;
+    font-size: 12px;
+    font-weight: 800;
+}
+QPushButton#GhostButton:hover, QPushButton#PrimaryButton:hover,
+QPushButton#ControlButton:hover, QPushButton#ControlPrimaryButton:hover {
     background: #837be8;
 }
 #Preview, #LogText {

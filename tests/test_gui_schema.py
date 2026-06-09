@@ -35,3 +35,12 @@ def test_gui_schema_marks_toggles_and_ranks_for_appropriate_controls():
     assert schema["detailed_analysis"].kind is GuiParameterKind.TOGGLE
     assert schema["n_prio_coin"].kind is GuiParameterKind.RANK
     assert schema["n_fire_cooldown"].kind is GuiParameterKind.FLOAT
+
+
+def test_gui_schema_localizes_parameter_display_text():
+    schema = {parameter.key: parameter for parameter in build_gui_parameter_schema()}
+
+    assert schema["coin_break_delay"].display_label("zh") == "硬币突破模式双发延迟"
+    assert schema["coin_break_delay"].display_description("zh") == "硬币突破模式中两次连续点击之间的延迟。"
+    assert schema["coin_break_delay"].display_label("en") == "Coin break delay"
+    assert schema["n_fire_cooldown"].display_label("zh") == "普通发射冷却时间"

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from autozuma.project_paths import project_path
+
 
 @dataclass(frozen=True)
 class AssetPaths:
@@ -16,8 +18,7 @@ class AssetPaths:
 
 
 def default_asset_paths() -> AssetPaths:
-    repo_root = Path(__file__).resolve().parents[3]
-    asset_root = repo_root / "assets"
+    asset_root = project_path("assets")
     return AssetPaths(
         root=asset_root,
         level_backgrounds=asset_root / "levels" / "backgrounds",

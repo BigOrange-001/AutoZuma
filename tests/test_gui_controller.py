@@ -19,7 +19,7 @@ def test_gui_controller_stays_idle_while_safe():
     assert result.message == "safe"
 
 
-def test_gui_controller_runs_dry_run_frame_when_armed():
+def test_gui_controller_executes_frame_when_armed():
     calls = {}
     frame_result = SimpleNamespace(
         state=StaticSessionState(level_id="spiral"),
@@ -50,15 +50,15 @@ def test_gui_controller_runs_dry_run_frame_when_armed():
 
     assert calls["frame"]["context"] == "context"
     assert calls["frame"]["current_time"] == 42.0
-    assert calls["frame"]["params"].session.host.execute_commands is False
+    assert calls["frame"]["params"].session.host.execute_commands is True
     assert calls["frame"]["params"].use_virtual_mouse is True
     assert result.level_id == "spiral"
     assert result.command_type == "shoot"
-    assert result.commands_enabled is False
+    assert result.commands_enabled is True
     assert result.mouse_mode == "virtual"
 
 
-def test_gui_controller_can_enable_command_execution():
+def test_gui_controller_snapshot_executes_when_armed():
     calls = {}
     frame_result = SimpleNamespace(
         state=StaticSessionState(level_id=None),
@@ -76,12 +76,14 @@ def test_gui_controller_can_enable_command_execution():
     )
     controller.arm()
 
-    controller.step(GuiRuntimeSettings(raw_values={}, execute_commands=True))
+    result = controller.step(GuiRuntimeSettings(raw_values={}), debug_snapshot=True)
 
     assert calls["frame"]["params"].session.host.execute_commands is True
+    assert result.commands_enabled is True
+    assert result.message == "snapshot"
 
 
-def test_gui_controller_snapshot_forces_dry_run_even_when_execution_is_enabled():
+def test_gui_controller_snapshot_does_not_execute_while_safe():
     calls = {}
     frame_result = SimpleNamespace(
         state=StaticSessionState(level_id=None),
@@ -97,12 +99,8 @@ def test_gui_controller_snapshot_forces_dry_run_even_when_execution_is_enabled()
         context_factory=lambda: "context",
         frame_runner=frame_runner,
     )
-    controller.arm()
 
-    result = controller.step(
-        GuiRuntimeSettings(raw_values={}, execute_commands=True),
-        debug_snapshot=True,
-    )
+    result = controller.step(GuiRuntimeSettings(raw_values={}), debug_snapshot=True)
 
     assert calls["frame"]["params"].session.host.execute_commands is False
     assert result.commands_enabled is False

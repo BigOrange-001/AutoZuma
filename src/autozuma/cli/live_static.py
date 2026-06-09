@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from autozuma.project_paths import project_path
 from autozuma.runtime.config import load_runtime_values, parse_runtime_overrides
 from autozuma.runtime.debug import FileDebugOutputSink
 from autozuma.runtime.host import StaticHostFrameParams
@@ -34,12 +35,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop after N iterations; omit to run until interrupted.",
     )
     parser.add_argument(
-        "--dry-run",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Plan commands without executing mouse input.",
-    )
-    parser.add_argument(
         "--virtual-mouse",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -60,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--debug-dir",
         type=Path,
-        default=Path("debug"),
+        default=project_path("debug"),
         help="Directory for F2 debug snapshots.",
     )
     return parser
@@ -83,7 +78,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     params = _build_loop_params(
         raw_values=raw_values,
-        dry_run=args.dry_run,
         use_virtual_mouse=use_virtual_mouse,
         window_title=args.window_title,
         fps=args.fps,
@@ -107,7 +101,6 @@ def main(argv: list[str] | None = None) -> int:
 def _build_loop_params(
     *,
     raw_values: dict[str, float],
-    dry_run: bool,
     use_virtual_mouse: bool,
     window_title: str,
     fps: float,
@@ -120,7 +113,7 @@ def _build_loop_params(
             session=StaticSessionParams(
                 host=StaticHostFrameParams(
                     runtime=StaticRuntimeFrameParams(raw_values=raw_values),
-                    execute_commands=not dry_run,
+                    execute_commands=True,
                 ),
                 level_min_confidence=level_min_confidence,
                 map_redetect_interval=map_redetect_interval,
