@@ -6,6 +6,8 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from autozuma.project_paths import project_path
+
 
 @dataclass(frozen=True)
 class GuiHotkeySettings:
@@ -26,7 +28,7 @@ class GuiSettings:
 
 def default_gui_settings_path() -> Path:
     """Return the default local GUI settings path."""
-    return Path(__file__).resolve().parents[3] / "config" / "gui_settings.json"
+    return project_path("config", "gui_settings.json")
 
 
 def load_gui_settings(path: Path | str | None = None) -> GuiSettings:

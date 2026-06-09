@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from time import time
 
 import numpy as np
 
+from autozuma.project_paths import project_path
 from autozuma.runtime.debug import (
     DebugOutputResult,
     FileDebugOutputSink,
@@ -31,12 +32,11 @@ class GuiRuntimeSettings:
     """Settings supplied by the GUI for live control."""
 
     raw_values: Mapping[str, float]
-    execute_commands: bool = False
     window_title: str = "zuma deluxe"
     fps: float = 10.0
     map_redetect_interval: float = 4.0
     level_min_confidence: float = 0.25
-    debug_dir: Path = Path("debug")
+    debug_dir: Path = field(default_factory=lambda: project_path("debug"))
 
 
 @dataclass(frozen=True)
@@ -100,7 +100,7 @@ class GuiRuntimeController:
         preview_sink = _GuiPreviewSink(
             file_sink=FileDebugOutputSink(settings.debug_dir) if debug_snapshot else None
         )
-        commands_enabled = settings.execute_commands and self.is_armed and not debug_snapshot
+        commands_enabled = self.is_armed
         result = self._frame_runner(
             context=self._context,
             state=self.state.session,

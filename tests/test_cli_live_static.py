@@ -1,10 +1,11 @@
 from types import SimpleNamespace
 
 from autozuma.cli import live_static
+from autozuma.project_paths import project_path
 from autozuma.runtime.loop import LiveLoopParams
 
 
-def test_live_static_cli_builds_dry_run_loop_params(monkeypatch, tmp_path, capsys):
+def test_live_static_cli_builds_executing_loop_params(monkeypatch, tmp_path, capsys):
     config_path = tmp_path / "strategy.ini"
     config_path.write_text(
         "[STRATEGY]\nvirtual_mouse = 1\nn_fire_cooldown = 0.25\n",
@@ -59,14 +60,14 @@ def test_live_static_cli_builds_dry_run_loop_params(monkeypatch, tmp_path, capsy
     assert params.live.use_virtual_mouse is True
     assert params.live.session.map_redetect_interval == 2
     assert params.live.session.level_min_confidence == 0.5
-    assert params.live.session.host.execute_commands is False
+    assert params.live.session.host.execute_commands is True
     assert params.live.session.host.runtime.raw_values["n_fire_cooldown"] == 0.25
     assert params.live.session.host.runtime.raw_values["r_fire_cooldown"] == 0.4
-    assert params.debug_output.root.name == "debug"
+    assert params.debug_output.root == project_path("debug")
     assert "iterations=3" in capsys.readouterr().out
 
 
-def test_live_static_cli_can_enable_command_execution_and_override_virtual_mouse(
+def test_live_static_cli_can_override_virtual_mouse(
     monkeypatch,
     tmp_path,
 ):
@@ -92,7 +93,6 @@ def test_live_static_cli_can_enable_command_execution_and_override_virtual_mouse
         [
             "--config",
             str(config_path),
-            "--no-dry-run",
             "--no-virtual-mouse",
             "--max-iterations",
             "0",
