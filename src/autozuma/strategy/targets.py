@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from dataclasses import dataclass
 
 from autozuma.core.models import (
@@ -19,6 +20,7 @@ from autozuma.strategy.actions import (
     is_cluster_locked,
     is_deadzone_locked,
 )
+from autozuma.strategy.line_of_sight import reachable_entities
 from autozuma.vision.colors import UNKNOWN_COLOR
 
 ELIM_TARGET = "ELIM"
@@ -44,6 +46,11 @@ class TargetScoringParams:
     action_state: ActionTrackerState | None = None
     current_time: float = 0.0
     soft_lock_radius: float = 35.0
+    reachable_radius_near: float = 18.0
+    reachable_radius_far: float = 22.0
+    reachable_full_distance: float = 900.0
+    projectile_width: float = 32.0
+    aim_ball_radius: float = 16.0
 
 
 def score_basic_targets(
@@ -82,10 +89,29 @@ def score_basic_targets_for_color(
         track = _find_track(level, cluster.track_id)
         if track is None:
             continue
-        center_point, center_entity = _cluster_target_context(cluster)
+        reachable = reachable_entities(
+            frog_pivot=level.topology.frog_pivot,
+            targets=cluster.entities,
+            entities=world_state.entities,
+            near_radius=params.reachable_radius_near,
+            far_radius=params.reachable_radius_far,
+            full_distance=params.reachable_full_distance,
+            projectile_width=params.projectile_width,
+            cluster_start_idx=cluster.start_idx,
+            cluster_end_idx=cluster.end_idx,
+        )
+        if not reachable:
+            continue
+
+        aim_point, context_entity, aim_track_idx = _cluster_target_context(
+            cluster,
+            reachable,
+            track,
+            params,
+        )
         if _is_action_locked(
-            center_point=center_point,
-            center_entity=center_entity,
+            center_point=aim_point,
+            track_idx=aim_track_idx,
             cluster=cluster,
             params=params,
         ):
@@ -97,6 +123,7 @@ def score_basic_targets_for_color(
             track=track,
             target_color=target_color,
             frog_pivot=level.topology.frog_pivot,
+            reachable=reachable,
             params=params,
         )
         candidates.append(candidate)
@@ -118,11 +145,16 @@ def _score_cluster(
     track: TrackGeometry,
     target_color: str,
     frog_pivot: Point,
+    reachable: tuple[BallEntity, ...],
     params: TargetScoringParams,
 ) -> TargetCandidate:
     cluster = clusters[cluster_idx]
-    center_point, center_entity = _cluster_target_context(cluster)
-    track_idx = _clamp_track_idx(center_entity.track_idx, track)
+    aim_point, _, track_idx = _cluster_target_context(
+        cluster,
+        reachable,
+        track,
+        params,
+    )
 
     target_type, base_score, combo_depth = _classify_target(
         clusters=clusters,
@@ -130,9 +162,9 @@ def _score_cluster(
         target_color=target_color,
         params=params,
     )
-    distance = math.hypot(center_point.x - frog_pivot.x, center_point.y - frog_pivot.y)
+    distance = math.hypot(aim_point.x - frog_pivot.x, aim_point.y - frog_pivot.y)
     orthogonality = _shot_track_orthogonality(
-        target=center_point,
+        target=aim_point,
         frog_pivot=frog_pivot,
         track=track,
         track_idx=track_idx,
@@ -154,33 +186,63 @@ def _score_cluster(
         final_score /= params.bad_geometry_penalty
 
     return TargetCandidate(
-        x=center_point.x,
-        y=center_point.y,
+        x=aim_point.x,
+        y=aim_point.y,
         score=final_score,
         target_type=target_type,
         reason=(
             f"cluster track={cluster.track_id} color={cluster.color} size={cluster.size} "
+            f"reachable={len(reachable)} "
             f"orthogonality={orthogonality:.3f} straightness={straightness:.3f} "
             f"combo_depth={combo_depth}"
         ),
         combo_depth=combo_depth,
         track_id=cluster.track_id,
-        track_idx=center_entity.track_idx,
+        track_idx=track_idx,
         cluster_start_idx=cluster.start_idx,
         cluster_end_idx=cluster.end_idx,
     )
 
 
-def _cluster_target_context(cluster: Cluster) -> tuple[Point, BallEntity]:
-    center_x = sum(entity.x for entity in cluster.entities) / cluster.size
-    center_y = sum(entity.y for entity in cluster.entities) / cluster.size
-    center_entity = cluster.entities[len(cluster.entities) // 2]
-    return Point(x=center_x, y=center_y), center_entity
+def _cluster_target_context(
+    cluster: Cluster,
+    reachable: tuple[BallEntity, ...] | None = None,
+    track: TrackGeometry | None = None,
+    params: TargetScoringParams = TargetScoringParams(),
+) -> tuple[Point, BallEntity, int]:
+    entities = reachable if reachable is not None else cluster.entities
+    if len(entities) % 2 == 0:
+        aim_entity = entities[len(entities) // 2]
+        return Point(x=aim_entity.x, y=aim_entity.y), aim_entity, aim_entity.track_idx
+
+    center_entity = entities[len(entities) // 2]
+    if track is None or not track.points or params.aim_ball_radius <= 0.0:
+        return Point(x=center_entity.x, y=center_entity.y), center_entity, center_entity.track_idx
+
+    track_idx = _track_idx_with_forward_distance(
+        center_entity.track_idx,
+        track,
+        params.aim_ball_radius,
+    )
+    aim_point = track.points[track_idx]
+    return aim_point, center_entity, track_idx
+
+
+def _track_idx_with_forward_distance(
+    track_idx: int,
+    track: TrackGeometry,
+    distance_pixels: float,
+) -> int:
+    clamped_idx = _clamp_track_idx(track_idx, track)
+    if not track.cumulative_distances or len(track.cumulative_distances) != len(track.points):
+        return clamped_idx
+    target_distance = track.cumulative_distances[clamped_idx] + distance_pixels
+    return _clamp_track_idx(bisect_left(track.cumulative_distances, target_distance), track)
 
 
 def _is_action_locked(
     center_point: Point,
-    center_entity: BallEntity,
+    track_idx: int,
     cluster: Cluster,
     params: TargetScoringParams,
 ) -> bool:
@@ -196,7 +258,7 @@ def _is_action_locked(
     return is_cluster_locked(
         state=params.action_state,
         track_id=cluster.track_id,
-        track_idx=center_entity.track_idx,
+        track_idx=track_idx,
         current_time=params.current_time,
     )
 

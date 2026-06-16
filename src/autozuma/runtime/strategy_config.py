@@ -15,7 +15,6 @@ from autozuma.runtime.params import RuntimeParameterResolver
 from autozuma.strategy.action_updates import CommandOutcomeParams
 from autozuma.strategy.coins import CoinScoringParams
 from autozuma.strategy.discard import DiscardParams
-from autozuma.strategy.prediction import TargetPredictionParams
 from autozuma.strategy.selection import TargetSelectionParams
 from autozuma.strategy.swap import SwapDecisionParams
 from autozuma.strategy.targets import TargetScoringParams
@@ -47,7 +46,6 @@ def build_runtime_strategy_config(
     combo_hang_base = resolver.get("COMBO_HANG_BASE", mode)
     combo_hang_mult = resolver.get("COMBO_HANG_MULT", mode)
     soft_lock_radius = resolver.get("SOFT_LOCK_RADIUS", mode)
-    predict_multiplier = resolver.get("PREDICT_MULT", mode)
     coin_break_delay = resolver.get("COIN_BREAK_DELAY", mode)
 
     frame_decision = StaticFrameDecisionParams(
@@ -59,8 +57,7 @@ def build_runtime_strategy_config(
             soft_lock_radius=soft_lock_radius,
         ),
         target_swap=SwapDecisionParams(),
-        target_prediction=TargetPredictionParams(predict_multiplier=predict_multiplier),
-        target_selection=TargetSelectionParams(min_gap=m_gap),
+        target_selection=TargetSelectionParams(),
         coin_scoring=CoinScoringParams(
             coin_priority=resolver.ranked_priority("PRIO_COIN", mode),
             min_gap=m_gap,

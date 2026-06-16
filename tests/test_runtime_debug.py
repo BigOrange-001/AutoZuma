@@ -6,6 +6,7 @@ import numpy as np
 from autozuma.control.execution import ExecutionPlan, ExecutionStep, ExecutionStepType
 from autozuma.core.models import (
     BallEntity,
+    Cluster,
     Command,
     CommandType,
     GameRoiResult,
@@ -18,13 +19,14 @@ from autozuma.decision.static_frame import StaticFrameDecisionResult
 from autozuma.runtime.debug import (
     FileDebugOutputSink,
     build_debug_summary,
+    render_static_decision_overlay,
     render_static_session_overlay,
 )
 from autozuma.runtime.modes import RuntimeModeUpdate, initial_runtime_mode_state
 from autozuma.runtime.session import StaticSessionFrameResult, StaticSessionPhase, StaticSessionState
 
 
-def test_file_debug_output_writes_frame_and_summary_for_detection_state(tmp_path):
+def test_file_debug_output_writes_only_overlay_in_debug_root_for_detection_state(tmp_path):
     frame = np.zeros((4, 5, 3), dtype=np.uint8)
     result = StaticSessionFrameResult(
         state=StaticSessionState(phase=StaticSessionPhase.DETECTING),
@@ -36,18 +38,15 @@ def test_file_debug_output_writes_frame_and_summary_for_detection_state(tmp_path
         current_time=10.25,
     )
 
-    assert output.output_dir.exists()
-    assert output.frame_path.exists()
-    assert output.summary_path.exists()
-    assert output.roi_path is None
-    assert output.overlay_path is None
-    summary = json.loads(output.summary_path.read_text(encoding="utf-8"))
-    assert summary["current_time"] == 10.25
-    assert summary["session"]["phase"] == "detecting"
-    assert "host" not in summary
+    assert output.output_dir == tmp_path
+    assert output.overlay_path.parent == tmp_path
+    assert output.overlay_path.exists()
+    assert output.overlay_path.name.endswith("_detecting_overlay.png")
+    assert not any(path.is_dir() for path in tmp_path.iterdir())
+    assert [path.suffix for path in tmp_path.iterdir()] == [".png"]
 
 
-def test_file_debug_output_writes_roi_overlay_and_decision_summary(tmp_path):
+def test_file_debug_output_writes_session_overlay_for_decision_state(tmp_path):
     frame = np.zeros((30, 40, 3), dtype=np.uint8)
     session_result = _playing_session_result()
 
@@ -57,14 +56,11 @@ def test_file_debug_output_writes_roi_overlay_and_decision_summary(tmp_path):
         current_time=12.0,
     )
 
-    assert output.roi_path is not None and output.roi_path.exists()
-    assert output.overlay_path is not None and output.overlay_path.exists()
-    summary = json.loads(output.summary_path.read_text(encoding="utf-8"))
-    assert summary["host"]["mode"] == "normal"
-    assert summary["host"]["world"]["entity_count"] == 1
-    assert summary["host"]["selected_target"]["target_type"] == "ELIM"
-    assert summary["host"]["screen_command"]["type"] == "shoot"
-    assert summary["host"]["execution_plan"][0]["type"] == "left_click"
+    assert output.output_dir == tmp_path
+    assert output.overlay_path.parent == tmp_path
+    assert output.overlay_path.exists()
+    assert output.overlay_path.name.endswith("_spiral_overlay.png")
+    assert len(tuple(tmp_path.iterdir())) == 1
 
 
 def test_build_debug_summary_stays_json_serializable():
@@ -80,6 +76,18 @@ def test_render_static_session_overlay_pastes_roi_overlay_into_full_frame():
 
     assert overlay.shape == frame.shape
     assert int(overlay.sum()) > 0
+
+
+def test_render_static_decision_overlay_marks_playable_cluster_and_aim_point():
+    decision = _playing_session_result().host_result.runtime.decision.decision
+
+    overlay = render_static_decision_overlay(decision)
+
+    assert tuple(int(channel) for channel in overlay[14, 5]) == (0, 0, 255)
+    aim_pixel = tuple(int(channel) for channel in overlay[13, 12])
+    assert aim_pixel[0] == 0
+    assert aim_pixel[1] == 0
+    assert 0 < aim_pixel[2] < 255
 
 
 def _playing_session_result():
@@ -105,8 +113,16 @@ def _playing_session_result():
                 next_ball="blue",
                 next_position=Point(x=10, y=10),
             ),
-            entities=(BallEntity(x=8, y=9, track_id=0, track_idx=6, color="red"),),
-            clusters=(),
+            entities=(BallEntity(x=5, y=14, track_id=0, track_idx=6, color="red"),),
+            clusters=(
+                Cluster(
+                    track_id=0,
+                    color="red",
+                    entities=(BallEntity(x=5, y=14, track_id=0, track_idx=6, color="red"),),
+                    start_idx=5,
+                    end_idx=9,
+                ),
+            ),
         ),
         current_candidates=(target,),
         next_candidates=(),
@@ -114,7 +130,7 @@ def _playing_session_result():
             reason="stay",
             should_swap=False,
         ),
-        predicted_candidates=(target,),
+        aim_candidates=(target,),
         selected_target=target,
         roi_command=command,
         screen_command=Command(CommandType.SHOOT, primary_target=Point(x=15, y=17)),

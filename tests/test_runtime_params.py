@@ -40,9 +40,9 @@ def test_resolve_runtime_parameter_falls_back_to_unscoped_key_then_zero():
 
 
 def test_resolve_runtime_parameter_is_case_insensitive_for_ini_style_keys():
-    resolver = RuntimeParameterResolver({"n_predict_mult": 0.055})
+    resolver = RuntimeParameterResolver({"n_m_gap": 23.0})
 
-    assert resolver.get("PREDICT_MULT", RuntimeMode.NORMAL) == 0.055
+    assert resolver.get("M_GAP", RuntimeMode.NORMAL) == 23.0
 
 
 def test_resolve_ranked_priority_preserves_prototype_weight_formula():

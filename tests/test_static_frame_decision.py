@@ -28,7 +28,6 @@ from autozuma.strategy.action_updates import CommandOutcomeParams, CommandOutcom
 from autozuma.strategy.actions import ActionTrackerState, Deadzone
 from autozuma.strategy.coins import CoinScoringParams
 from autozuma.strategy.discard import DiscardParams
-from autozuma.strategy.prediction import TargetPredictionParams
 from autozuma.strategy.selection import TargetSelectionParams
 from autozuma.strategy.swap import SwapDecisionParams
 from autozuma.strategy.targets import TargetScoringParams
@@ -80,7 +79,7 @@ def test_decide_static_frame_command_returns_screen_shoot_for_clear_target(monke
     )
 
     assert command.command_type == CommandType.SHOOT
-    assert command.primary_target == Point(x=110.0, y=137.0)
+    assert command.primary_target == Point(x=110.0, y=130.0)
     assert command.secondary_target is None
     assert calls["roi"] == (raw_frame, level)
     assert calls["world"] == (roi_frame, level, template_set, 11.0, 22.0)
@@ -113,9 +112,9 @@ def test_decide_static_frame_returns_detailed_result(monkeypatch):
     assert result.world_state == world_state
     assert result.selected_target is not None
     assert result.roi_command.command_type == CommandType.SHOOT
-    assert result.screen_command.primary_target == Point(x=110.0, y=137.0)
+    assert result.screen_command.primary_target == Point(x=110.0, y=130.0)
     assert result.current_candidates
-    assert result.predicted_candidates
+    assert result.aim_candidates
 
 
 def test_decide_static_frame_command_returns_screen_no_op_without_target(monkeypatch):
@@ -229,12 +228,11 @@ def test_decide_static_frame_command_returns_swap_shoot_for_better_next_target(m
         launcher_templates=template_set,
         params=StaticFrameDecisionParams(
             target_swap=SwapDecisionParams(swap_score_ratio=1.15),
-            target_prediction=TargetPredictionParams(predict_multiplier=0.05),
         ),
     )
 
     assert command.command_type == CommandType.SWAP_SHOOT
-    assert command.primary_target == Point(x=110.0, y=127.0)
+    assert command.primary_target == Point(x=110.0, y=120.0)
     assert command.secondary_target is None
 
 
@@ -329,7 +327,6 @@ def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
     template_set = LauncherTemplateSet(search_radius=5, step_degrees=5, templates={})
     scoring_params = TargetScoringParams(elim_priority=123.0)
     swap_params = SwapDecisionParams(swap_score_ratio=1.5)
-    prediction_params = TargetPredictionParams(predict_multiplier=0.25)
     selection_params = TargetSelectionParams(min_gap=44.0)
     coin_params = CoinScoringParams(coin_priority=777.0)
     active_coins = (Point(x=1.0, y=2.0),)
@@ -351,10 +348,6 @@ def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
     def fake_score_basic_targets(world_state, level, params):
         calls["score"] = params
         return ()
-
-    def fake_predict_targets(targets, level, frog_pivot, params):
-        calls["predict"] = params
-        return targets
 
     def fake_score_coin_targets_for_color(
         world_state,
@@ -389,10 +382,6 @@ def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
         fake_score_basic_targets,
     )
     monkeypatch.setattr(
-        "autozuma.decision.static_frame.predict_targets",
-        fake_predict_targets,
-    )
-    monkeypatch.setattr(
         "autozuma.decision.static_frame.score_coin_targets_for_color",
         fake_score_coin_targets_for_color,
     )
@@ -412,7 +401,6 @@ def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
         params=StaticFrameDecisionParams(
             target_scoring=scoring_params,
             target_swap=swap_params,
-            target_prediction=prediction_params,
             target_selection=selection_params,
             coin_scoring=coin_params,
             active_coins=active_coins,
@@ -425,7 +413,6 @@ def test_decide_static_frame_command_passes_strategy_params(monkeypatch):
         (active_coins, "yellow", coin_params),
     ]
     assert calls["swap"] == swap_params
-    assert calls["predict"] == prediction_params
     assert calls["select"] == selection_params
 
 

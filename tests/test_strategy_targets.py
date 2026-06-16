@@ -60,10 +60,11 @@ def test_score_basic_targets_scores_elimination_cluster():
 
     assert len(targets) == 1
     assert targets[0].target_type == ELIM_TARGET
-    assert targets[0].x == 31.0
+    assert targets[0].x == 32.0
     assert targets[0].y == 50.0
     assert targets[0].score > 0
     assert "size=2" in targets[0].reason
+    assert "reachable=2" in targets[0].reason
     assert targets[0].track_id == 0
     assert targets[0].track_idx == 32
     assert targets[0].cluster_start_idx == 30
@@ -226,6 +227,79 @@ def test_score_basic_targets_skips_cluster_inside_active_cluster_lock():
     assert targets == ()
 
 
+def test_score_basic_targets_uses_reachable_subset_for_aim_point():
+    blocked = BallEntity(x=100.0, y=0.0, track_id=0, track_idx=100, color="red")
+    also_blocked = BallEntity(x=110.0, y=0.0, track_id=0, track_idx=110, color="red")
+    reachable_one = BallEntity(x=130.0, y=180.0, track_id=0, track_idx=130, color="red")
+    reachable_two = BallEntity(x=140.0, y=180.0, track_id=0, track_idx=140, color="red")
+    blocker_one = BallEntity(x=50.0, y=0.0, track_id=1, track_idx=50, color="blue")
+    blocker_two = BallEntity(x=55.0, y=0.0, track_id=1, track_idx=55, color="blue")
+    cluster = Cluster(
+        track_id=0,
+        color="red",
+        entities=(blocked, also_blocked, reachable_one, reachable_two),
+        start_idx=100,
+        end_idx=140,
+    )
+    world_state = _world_state(current_ball="red", clusters=(cluster,))
+    world_state = WorldState(
+        level_id=world_state.level_id,
+        launcher=world_state.launcher,
+        entities=world_state.entities + (blocker_one, blocker_two),
+        clusters=world_state.clusters,
+    )
+
+    targets = score_basic_targets(world_state, _horizontal_level(), _params())
+
+    assert len(targets) == 1
+    assert targets[0].x == 140.0
+    assert targets[0].y == 180.0
+    assert targets[0].track_idx == 140
+    assert "reachable=2" in targets[0].reason
+
+
+def test_score_basic_targets_ignores_same_track_entities_for_reachability():
+    near = BallEntity(x=50.0, y=0.0, track_id=0, track_idx=50, color="red")
+    far = BallEntity(x=100.0, y=0.0, track_id=0, track_idx=100, color="red")
+    cluster = Cluster(
+        track_id=0,
+        color="red",
+        entities=(near, far),
+        start_idx=50,
+        end_idx=100,
+    )
+    world_state = _world_state(current_ball="red", clusters=(cluster,))
+
+    targets = score_basic_targets(world_state, _horizontal_level(), _params())
+
+    assert len(targets) == 1
+    assert "reachable=2" in targets[0].reason
+
+
+def test_score_basic_targets_aims_odd_reachable_cluster_at_forward_ball_edge():
+    entities = (
+        BallEntity(x=30.0, y=0.0, track_id=0, track_idx=30, color="red"),
+        BallEntity(x=50.0, y=0.0, track_id=0, track_idx=50, color="red"),
+        BallEntity(x=70.0, y=0.0, track_id=0, track_idx=70, color="red"),
+    )
+    cluster = Cluster(
+        track_id=0,
+        color="red",
+        entities=entities,
+        start_idx=30,
+        end_idx=70,
+    )
+    world_state = _world_state(current_ball="red", clusters=(cluster,))
+
+    targets = score_basic_targets(world_state, _horizontal_level(), _params())
+
+    assert len(targets) == 1
+    assert targets[0].x == 66.0
+    assert targets[0].y == 0.0
+    assert targets[0].track_idx == 66
+    assert "reachable=3" in targets[0].reason
+
+
 def _params() -> TargetScoringParams:
     return TargetScoringParams(
         combo_priority=100.0,
@@ -278,6 +352,28 @@ def _level() -> LevelRuntimeAssets:
     topology = LevelTopology(
         level_id="test",
         frog_pivot=Point(x=60.0, y=0.0),
+        tracks=(),
+        treasure_points=(),
+        source_path=Path("test.json"),
+    )
+    return LevelRuntimeAssets(
+        level_id="test",
+        topology=topology,
+        geometry=LevelGeometry(level_id="test", tracks=(track,)),
+        background=None,
+    )
+
+
+def _horizontal_level() -> LevelRuntimeAssets:
+    points = tuple(Point(x=float(index), y=0.0) for index in range(201))
+    track = TrackGeometry(
+        track_id=0,
+        points=points,
+        cumulative_distances=tuple(float(index) for index in range(len(points))),
+    )
+    topology = LevelTopology(
+        level_id="test",
+        frog_pivot=Point(x=0.0, y=0.0),
         tracks=(),
         treasure_points=(),
         source_path=Path("test.json"),

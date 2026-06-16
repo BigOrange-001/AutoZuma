@@ -26,6 +26,8 @@ from autozuma.runtime.session import StaticSessionParams
 from autozuma.runtime.static_runtime import StaticRuntimeFrameParams
 from autozuma.runtime.loop import LiveLoopState, initial_live_loop_state
 
+DEBUG_SNAPSHOT_INTERVAL_SECONDS = 10.0
+
 
 @dataclass(frozen=True)
 class GuiRuntimeSettings:
@@ -51,6 +53,8 @@ class GuiRuntimeStep:
     mouse_mode: str = "virtual"
     mode: str | None = None
     preview_bgr: np.ndarray | None = None
+    debug_snapshots_enabled: bool = False
+    debug_snapshot_saved: bool = False
 
 
 class GuiRuntimeController:
@@ -69,6 +73,8 @@ class GuiRuntimeController:
         self._context: LiveStaticSessionContext | None = None
         self.state = initial_live_loop_state()
         self.is_armed = False
+        self.debug_snapshots_enabled = False
+        self._last_debug_snapshot_time = 0.0
 
     def arm(self) -> None:
         """Arm frame processing and reset session detection state."""
@@ -79,46 +85,61 @@ class GuiRuntimeController:
         """Stop GUI-triggered frame processing."""
         self.is_armed = False
 
+    def toggle_debug_snapshots(self) -> bool:
+        """Toggle periodic debug snapshot output."""
+        self.debug_snapshots_enabled = not self.debug_snapshots_enabled
+        if self.debug_snapshots_enabled:
+            self._last_debug_snapshot_time = self._clock()
+        return self.debug_snapshots_enabled
+
     def step(
         self,
         settings: GuiRuntimeSettings,
-        *,
-        debug_snapshot: bool = False,
     ) -> GuiRuntimeStep:
         """Run one live frame when armed."""
-        if not self.is_armed and not debug_snapshot:
+        if not self.is_armed:
             return GuiRuntimeStep(
                 state=self.state,
                 level_id=self.state.session.level_id,
                 command_type="NO_OP",
                 message="safe",
+                debug_snapshots_enabled=self.debug_snapshots_enabled,
             )
 
         if self._context is None:
             self._context = self._context_factory()
 
+        current_time = self._clock()
+        should_save_debug = (
+            self.debug_snapshots_enabled
+            and current_time - self._last_debug_snapshot_time >= DEBUG_SNAPSHOT_INTERVAL_SECONDS
+        )
         preview_sink = _GuiPreviewSink(
-            file_sink=FileDebugOutputSink(settings.debug_dir) if debug_snapshot else None
+            file_sink=FileDebugOutputSink(settings.debug_dir) if should_save_debug else None
         )
         commands_enabled = self.is_armed
         result = self._frame_runner(
             context=self._context,
             state=self.state.session,
-            current_time=self._clock(),
+            current_time=current_time,
             params=_live_params(settings, execute_commands=commands_enabled),
             debug_output=preview_sink,
         )
+        if preview_sink.debug_output_result is not None:
+            self._last_debug_snapshot_time = current_time
         self.state = LiveLoopState(session=result.state, hotkeys=self.state.hotkeys)
         command_type = _command_type_from_result(result)
         return GuiRuntimeStep(
             state=self.state,
             level_id=result.state.level_id,
             command_type=command_type,
-            message="snapshot" if debug_snapshot else "frame",
+            message="frame+debug" if preview_sink.debug_output_result is not None else "frame",
             commands_enabled=commands_enabled,
             mouse_mode="virtual" if bool(settings.raw_values.get("virtual_mouse", 0.0)) else "physical",
             mode=_mode_from_result(result),
             preview_bgr=preview_sink.preview_bgr,
+            debug_snapshots_enabled=self.debug_snapshots_enabled,
+            debug_snapshot_saved=preview_sink.debug_output_result is not None,
         )
 
 
@@ -170,6 +191,7 @@ class _GuiPreviewSink:
     def __init__(self, file_sink: FileDebugOutputSink | None = None) -> None:
         self._file_sink = file_sink
         self.preview_bgr: np.ndarray | None = None
+        self.debug_output_result: DebugOutputResult | None = None
 
     def write(
         self,
@@ -181,8 +203,9 @@ class _GuiPreviewSink:
         self.preview_bgr = render_static_session_overlay(frame_bgr, session_result)
         if self._file_sink is None:
             return None
-        return self._file_sink.write(
+        self.debug_output_result = self._file_sink.write(
             frame_bgr=frame_bgr,
             session_result=session_result,
             current_time=current_time,
         )
+        return self.debug_output_result

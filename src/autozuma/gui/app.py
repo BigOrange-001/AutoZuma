@@ -21,6 +21,7 @@ from autozuma.gui.settings import (
     load_gui_settings,
     save_gui_settings,
 )
+from autozuma.gui.global_hotkeys import GuiGlobalHotkeyPoller, Win32GuiHotkeyReader
 from autozuma.runtime.config import (
     DEFAULT_RUNTIME_VALUES,
     default_config_path,
@@ -51,7 +52,7 @@ class AutoZumaGuiWindow:
 
     def __new__(cls):
         from PySide6.QtCore import QTimer, Qt
-        from PySide6.QtGui import QFont, QImage, QKeySequence, QPixmap, QShortcut
+        from PySide6.QtGui import QFont, QImage, QKeySequence, QPixmap
         from PySide6.QtWidgets import (
             QCheckBox,
             QComboBox,
@@ -88,7 +89,11 @@ class AutoZumaGuiWindow:
                 self.parameter_controls: dict[str, QWidget] = {}
                 self.parameter_labels: list[tuple[QLabel, GuiParameterDefinition]] = []
                 self.control_buttons: dict[str, tuple[QPushButton, str]] = {}
-                self.shortcuts: dict[str, QShortcut] = {}
+                self.global_hotkeys = GuiGlobalHotkeyPoller(
+                    Win32GuiHotkeyReader(),
+                    self.gui_settings.hotkeys,
+                )
+                self.hotkey_error_reported = False
                 self.status_values: dict[str, QLabel] = {}
                 self.preview_label: QLabel | None = None
                 self.language_selector: QComboBox | None = None
@@ -100,6 +105,10 @@ class AutoZumaGuiWindow:
                 self.timer = QTimer(self)
                 self.timer.setInterval(100)
                 self.timer.timeout.connect(self._tick)
+                self.hotkey_timer = QTimer(self)
+                self.hotkey_timer.setInterval(50)
+                self.hotkey_timer.timeout.connect(self._poll_global_hotkeys)
+                self.hotkey_timer.start()
 
                 schema = build_gui_parameter_schema(self.runtime_values)
 
@@ -196,17 +205,34 @@ class AutoZumaGuiWindow:
                 self._append_log("safe")
 
             def _snapshot(self) -> None:
-                self._run_step(debug_snapshot=True)
+                enabled = self.controller.toggle_debug_snapshots()
+                button_entry = self.control_buttons.get("snapshot")
+                if button_entry is not None:
+                    button_entry[0].setChecked(enabled)
+                self._append_log("debug snapshots on" if enabled else "debug snapshots off")
 
             def _tick(self) -> None:
-                self._run_step(debug_snapshot=False)
+                self._run_step()
 
-            def _run_step(self, *, debug_snapshot: bool) -> None:
+            def _poll_global_hotkeys(self) -> None:
                 try:
-                    result = self.controller.step(
-                        self._settings(),
-                        debug_snapshot=debug_snapshot,
-                    )
+                    events = self.global_hotkeys.poll()
+                except Exception as exc:  # noqa: BLE001 - hotkey backend is optional at GUI boundary.
+                    if not self.hotkey_error_reported:
+                        self._append_log(f"global hotkeys unavailable: {exc}")
+                        self.hotkey_error_reported = True
+                    return
+
+                if events.toggle_arm:
+                    self._toggle_arm()
+                if events.toggle_debug_snapshots:
+                    self._snapshot()
+                if events.safe:
+                    self._safe()
+
+            def _run_step(self) -> None:
+                try:
+                    result = self.controller.step(self._settings())
                 except Exception as exc:  # noqa: BLE001 - GUI boundary reports runtime failures.
                     self._append_log(f"error: {exc}")
                     return
@@ -296,7 +322,7 @@ class AutoZumaGuiWindow:
                         control.setValue(float(value))
 
             def _apply_hotkey_settings(self, hotkeys: GuiHotkeySettings) -> None:
-                self._install_shortcuts()
+                self.global_hotkeys.update_settings(hotkeys)
                 self._sync_control_button_texts()
 
             def _save_gui_settings(self) -> None:
@@ -357,22 +383,7 @@ class AutoZumaGuiWindow:
                     button.setText(original_text)
 
             def _install_shortcuts(self) -> None:
-                for shortcut in self.shortcuts.values():
-                    shortcut.setParent(None)
-                self.shortcuts = {}
-
-                for name, callback in (
-                    ("toggle_arm", self._toggle_arm),
-                    ("snapshot", self._snapshot),
-                    ("safe", self._safe),
-                ):
-                    key_text = self._hotkey_text(name)
-                    if not key_text:
-                        continue
-                    shortcut = QShortcut(QKeySequence(key_text), self)
-                    shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
-                    shortcut.activated.connect(callback)
-                    self.shortcuts[name] = shortcut
+                self.global_hotkeys.update_settings(self.gui_settings.hotkeys)
 
             def _set_status(self, key: str, value: str) -> None:
                 label = self.status_values.get(key)
@@ -460,6 +471,7 @@ class AutoZumaGuiWindow:
             arm = window._localized_button("arm", "ControlPrimaryButton", "tip_arm")
             safe = window._localized_button("safe_button", "ControlButton", "tip_safe")
             snapshot = window._localized_button("snapshot", "ControlButton", "tip_snapshot")
+            snapshot.setCheckable(True)
             window.control_buttons["toggle_arm"] = (arm, "arm")
             window.control_buttons["safe"] = (safe, "safe_button")
             window.control_buttons["snapshot"] = (snapshot, "snapshot")
