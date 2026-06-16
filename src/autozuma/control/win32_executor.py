@@ -17,6 +17,13 @@ class WindowRect:
     height: int
 
 
+@dataclass(frozen=True)
+class _WindowCandidate:
+    hwnd: int
+    title: str
+    rect: WindowRect
+
+
 class Win32CommandExecutor:
     """Execute planned command steps against a Zuma client-window frame."""
 
@@ -94,29 +101,58 @@ class Win32CommandExecutor:
 
 def find_game_window(window_title: str = "zuma deluxe") -> tuple[int, WindowRect]:
     """Locate the game window and return its handle plus client screen rect."""
-    win32api, _, win32gui = _import_pywin32()
-    matched_hwnd = 0
+    _, _, win32gui = _import_pywin32()
+    candidates: list[_WindowCandidate] = []
+    normalized_query = window_title.lower()
 
     def enum_window_callback(hwnd: int, _: object) -> None:
-        nonlocal matched_hwnd
-        if win32gui.IsWindowVisible(hwnd) and window_title.lower() in win32gui.GetWindowText(
-            hwnd
-        ).lower():
-            matched_hwnd = hwnd
+        title = win32gui.GetWindowText(hwnd)
+        if not win32gui.IsWindowVisible(hwnd) or normalized_query not in title.lower():
+            return
+        if hasattr(win32gui, "IsIconic") and win32gui.IsIconic(hwnd):
+            return
+
+        rect = _client_screen_rect(win32gui, hwnd)
+        if not _is_usable_game_client_rect(rect):
+            return
+        candidates.append(_WindowCandidate(hwnd=hwnd, title=title, rect=rect))
 
     win32gui.EnumWindows(enum_window_callback, None)
-    if not matched_hwnd:
+    if not candidates:
         raise RuntimeError(f"could not find visible window matching {window_title!r}")
 
-    client_rect = win32gui.GetClientRect(matched_hwnd)
-    left, top = win32gui.ClientToScreen(matched_hwnd, (client_rect[0], client_rect[1]))
-    rect = WindowRect(
+    candidate = min(candidates, key=lambda item: _window_candidate_sort_key(item, window_title))
+    return candidate.hwnd, candidate.rect
+
+
+def _client_screen_rect(win32gui: object, hwnd: int) -> WindowRect:
+    client_rect = win32gui.GetClientRect(hwnd)
+    left, top = win32gui.ClientToScreen(hwnd, (client_rect[0], client_rect[1]))
+    return WindowRect(
         left=left,
         top=top,
         width=client_rect[2] - client_rect[0],
         height=client_rect[3] - client_rect[1],
     )
-    return matched_hwnd, rect
+
+
+def _is_usable_game_client_rect(rect: WindowRect) -> bool:
+    return rect.width >= 320 and rect.height >= 240
+
+
+def _window_candidate_sort_key(
+    candidate: _WindowCandidate,
+    window_title: str,
+) -> tuple[int, int, int, int]:
+    title = candidate.title.lower().strip()
+    query = window_title.lower().strip()
+    area = candidate.rect.width * candidate.rect.height
+    return (
+        0 if title == query else 1,
+        0 if title.startswith(query) else 1,
+        -area,
+        len(title),
+    )
 
 
 def _import_pywin32():
