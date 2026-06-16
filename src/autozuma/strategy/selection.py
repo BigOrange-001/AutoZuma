@@ -11,7 +11,7 @@ from autozuma.strategy.line_of_sight import check_line_of_sight
 
 @dataclass(frozen=True)
 class TargetSelectionParams:
-    min_gap: float = 36.0
+    min_gap: float = 0.0
 
 
 def select_best_clear_target(

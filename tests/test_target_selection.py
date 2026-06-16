@@ -77,6 +77,29 @@ def test_select_best_clear_target_uses_candidate_cluster_metadata():
     assert selected == candidate
 
 
+def test_select_best_clear_target_blocks_same_track_entities_outside_candidate_neighborhood():
+    candidate = _candidate(
+        x=100,
+        y=0,
+        score=20,
+        track_id=0,
+        track_idx=200,
+        cluster_start_idx=180,
+        cluster_end_idx=220,
+    )
+    world_state = _world_state(
+        entities=(_entity(x=50, y=0, track_id=0, track_idx=50),),
+    )
+
+    selected = select_best_clear_target(
+        world_state=world_state,
+        candidates=(candidate,),
+        frog_pivot=Point(x=0, y=0),
+    )
+
+    assert selected is None
+
+
 def _world_state(entities: tuple[BallEntity, ...]) -> WorldState:
     return WorldState(
         level_id="test",

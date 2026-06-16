@@ -26,7 +26,6 @@ from autozuma.strategy.actions import apply_virtual_balls_to_clusters
 from autozuma.strategy.commands import command_for_selected_target
 from autozuma.strategy.coins import CoinScoringParams, score_coin_targets_for_color
 from autozuma.strategy.discard import DiscardParams, discard_target
-from autozuma.strategy.prediction import TargetPredictionParams, predict_targets
 from autozuma.strategy.selection import TargetSelectionParams, select_best_clear_target
 from autozuma.strategy.swap import SwapDecision, SwapDecisionParams, choose_swap_candidates
 from autozuma.strategy.targets import (
@@ -44,7 +43,6 @@ class StaticFrameDecisionParams:
 
     target_scoring: TargetScoringParams = TargetScoringParams()
     target_swap: SwapDecisionParams = SwapDecisionParams()
-    target_prediction: TargetPredictionParams = TargetPredictionParams()
     target_selection: TargetSelectionParams = TargetSelectionParams()
     coin_scoring: CoinScoringParams = CoinScoringParams()
     active_coins: tuple[Point, ...] = ()
@@ -62,7 +60,7 @@ class StaticFrameDecisionResult:
     current_candidates: tuple[TargetCandidate, ...]
     next_candidates: tuple[TargetCandidate, ...]
     swap_decision: SwapDecision
-    predicted_candidates: tuple[TargetCandidate, ...]
+    aim_candidates: tuple[TargetCandidate, ...]
     selected_target: TargetCandidate | None
     roi_command: Command
     screen_command: Command
@@ -269,15 +267,10 @@ def decide_static_frame_from_world(
         )
     else:
         swap_decision = _stay_for_swap_cooldown(candidates, next_candidates)
-    predicted_candidates = predict_targets(
-        targets=swap_decision.candidates,
-        level=level,
-        frog_pivot=level.topology.frog_pivot,
-        params=params.target_prediction,
-    )
+    aim_candidates = tuple(swap_decision.candidates)
     selected_target = select_best_clear_target(
         world_state=world_state,
-        candidates=predicted_candidates,
+        candidates=aim_candidates,
         frog_pivot=level.topology.frog_pivot,
         params=params.target_selection,
     )
@@ -301,7 +294,7 @@ def decide_static_frame_from_world(
         current_candidates=tuple(candidates),
         next_candidates=tuple(next_candidates),
         swap_decision=swap_decision,
-        predicted_candidates=predicted_candidates,
+        aim_candidates=aim_candidates,
         selected_target=selected_target,
         roi_command=roi_command,
         screen_command=screen_command,

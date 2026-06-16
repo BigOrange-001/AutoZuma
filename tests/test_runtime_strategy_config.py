@@ -13,9 +13,8 @@ def test_build_runtime_strategy_config_maps_normal_mode_values():
     frame = config.frame_decision
     assert config.mode_params.rescue_distance_threshold == 410.0
     assert config.mode_params.endgame_spawn_distance_threshold == 155.0
-    assert frame.target_selection.min_gap == 23.0
+    assert frame.target_selection.min_gap == 0.0
     assert frame.fallback_discard.min_gap == 23.0
-    assert frame.target_prediction.predict_multiplier == 0.055
     assert frame.target_scoring.soft_lock_radius == 16.0
     assert frame.p_start_exclude == 128.0
     assert frame.p_end_exclude == 101.0
@@ -43,8 +42,7 @@ def test_build_runtime_strategy_config_uses_rescue_values_when_rescue_mode():
     )
 
     frame = config.frame_decision
-    assert frame.target_selection.min_gap == 22.0
-    assert frame.target_prediction.predict_multiplier == 0.05
+    assert frame.target_selection.min_gap == 0.0
     assert frame.target_scoring.combo_priority == 100000.0
     assert frame.target_scoring.rollback_elim_priority == 10000.0
     assert frame.target_scoring.elim_priority == 1000.0
@@ -59,8 +57,7 @@ def test_build_runtime_strategy_config_uses_endgame_values_when_endgame_mode():
     )
 
     frame = config.frame_decision
-    assert frame.target_selection.min_gap == 40.0
-    assert frame.target_prediction.predict_multiplier == 0.025
+    assert frame.target_selection.min_gap == 0.0
     assert frame.target_scoring.combo_priority == 100000.0
     assert frame.target_scoring.rollback_elim_priority == 10000.0
     assert frame.target_scoring.elim_priority == 10000.0
@@ -104,9 +101,6 @@ def _params() -> dict[str, float]:
         "n_soft_lock_radius": 16.0,
         "r_soft_lock_radius": 17.0,
         "e_soft_lock_radius": 18.0,
-        "n_predict_mult": 0.055,
-        "r_predict_mult": 0.05,
-        "e_predict_mult": 0.025,
         "n_prio_coin": 1.0,
         "r_prio_coin": 2.0,
         "e_prio_coin": 4.0,

@@ -58,53 +58,97 @@ def test_gui_controller_executes_frame_when_armed():
     assert result.mouse_mode == "virtual"
 
 
-def test_gui_controller_snapshot_executes_when_armed():
-    calls = {}
-    frame_result = SimpleNamespace(
-        state=StaticSessionState(level_id=None),
-        host_result=None,
-        ui_result=None,
+def test_gui_controller_toggles_debug_snapshots_without_running_frame():
+    controller = GuiRuntimeController(
+        context_factory=lambda: (_ for _ in ()).throw(AssertionError("context should not load")),
+        clock=lambda: 10.0,
     )
 
+    assert controller.toggle_debug_snapshots() is True
+    assert controller.debug_snapshots_enabled is True
+    assert controller.toggle_debug_snapshots() is False
+    assert controller.debug_snapshots_enabled is False
+
+
+def test_gui_controller_periodic_debug_snapshot_waits_for_interval(tmp_path):
+    calls = {}
+    clock = {"now": 0.0}
+    frame_result = StaticSessionFrameResult(state=StaticSessionState(level_id=None))
+
     def frame_runner(**kwargs):
-        calls["frame"] = kwargs
+        calls.setdefault("frames", []).append(kwargs)
+        kwargs["debug_output"].write(
+            frame_bgr=np.zeros((4, 5, 3), dtype=np.uint8),
+            session_result=frame_result,
+            current_time=kwargs["current_time"],
+        )
         return frame_result
 
     controller = GuiRuntimeController(
         context_factory=lambda: "context",
         frame_runner=frame_runner,
+        clock=lambda: clock["now"],
     )
     controller.arm()
+    assert controller.toggle_debug_snapshots() is True
 
-    result = controller.step(GuiRuntimeSettings(raw_values={}), debug_snapshot=True)
+    clock["now"] = 9.9
+    result = controller.step(GuiRuntimeSettings(raw_values={}, debug_dir=tmp_path))
+    assert result.debug_snapshots_enabled is True
+    assert result.debug_snapshot_saved is False
+    assert result.message == "frame"
 
-    assert calls["frame"]["params"].session.host.execute_commands is True
+    clock["now"] = 10.0
+    result = controller.step(GuiRuntimeSettings(raw_values={}, debug_dir=tmp_path))
+    assert result.debug_snapshot_saved is True
+    assert result.message == "frame+debug"
+    assert any(tmp_path.iterdir())
+    assert calls["frames"][-1]["params"].session.host.execute_commands is True
     assert result.commands_enabled is True
-    assert result.message == "snapshot"
 
 
-def test_gui_controller_snapshot_does_not_execute_while_safe():
-    calls = {}
-    frame_result = SimpleNamespace(
-        state=StaticSessionState(level_id=None),
-        host_result=None,
-        ui_result=None,
+def test_gui_controller_periodic_debug_snapshot_does_not_run_while_safe():
+    controller = GuiRuntimeController(
+        context_factory=lambda: (_ for _ in ()).throw(AssertionError("context should not load")),
+        clock=lambda: 0.0,
     )
+    assert controller.toggle_debug_snapshots() is True
+
+    result = controller.step(GuiRuntimeSettings(raw_values={}))
+
+    assert result.commands_enabled is False
+    assert result.debug_snapshots_enabled is True
+    assert result.debug_snapshot_saved is False
+    assert result.message == "safe"
+
+
+def test_gui_controller_periodic_debug_snapshot_stops_after_toggle_off(tmp_path):
+    clock = {"now": 0.0}
+    frame_result = StaticSessionFrameResult(state=StaticSessionState(level_id=None))
 
     def frame_runner(**kwargs):
-        calls["frame"] = kwargs
+        kwargs["debug_output"].write(
+            frame_bgr=np.zeros((4, 5, 3), dtype=np.uint8),
+            session_result=frame_result,
+            current_time=kwargs["current_time"],
+        )
         return frame_result
 
     controller = GuiRuntimeController(
         context_factory=lambda: "context",
         frame_runner=frame_runner,
+        clock=lambda: clock["now"],
     )
+    controller.arm()
+    controller.toggle_debug_snapshots()
+    controller.toggle_debug_snapshots()
 
-    result = controller.step(GuiRuntimeSettings(raw_values={}), debug_snapshot=True)
+    clock["now"] = 20.0
+    result = controller.step(GuiRuntimeSettings(raw_values={}, debug_dir=tmp_path))
 
-    assert calls["frame"]["params"].session.host.execute_commands is False
-    assert result.commands_enabled is False
-    assert result.message == "snapshot"
+    assert result.debug_snapshots_enabled is False
+    assert result.debug_snapshot_saved is False
+    assert not any(tmp_path.iterdir())
 
 
 def test_gui_controller_returns_live_preview_frame():
@@ -131,7 +175,7 @@ def test_gui_controller_returns_live_preview_frame():
     assert np.array_equal(result.preview_bgr, frame)
 
 
-def test_gui_controller_passes_debug_sink_for_snapshot():
+def test_gui_controller_passes_preview_sink_for_frame():
     calls = {}
     frame_result = SimpleNamespace(
         state=StaticSessionState(level_id=None),
@@ -148,7 +192,8 @@ def test_gui_controller_passes_debug_sink_for_snapshot():
         frame_runner=frame_runner,
     )
 
-    result = controller.step(GuiRuntimeSettings(raw_values={}), debug_snapshot=True)
+    controller.arm()
+    result = controller.step(GuiRuntimeSettings(raw_values={}))
 
     assert calls["debug_output"] is not None
-    assert result.message == "snapshot"
+    assert result.message == "frame"

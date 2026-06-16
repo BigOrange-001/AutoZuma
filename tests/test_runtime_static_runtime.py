@@ -100,7 +100,7 @@ def test_run_static_runtime_frame_threads_coin_mode_and_decision_state(monkeypat
     assert result.state.mode_state.mode == RuntimeMode.RESCUE
 
     assert result.strategy_config.frame_decision.active_coins == (Point(x=20.0, y=20.0),)
-    assert result.strategy_config.frame_decision.target_selection.min_gap == 22.0
+    assert result.strategy_config.frame_decision.target_selection.min_gap == 0.0
     assert result.decision.decision.roi_result == roi_result
     assert result.decision.decision.world_state == world_state
     assert result.decision.decision.screen_command.command_type == CommandType.SHOOT
@@ -220,9 +220,6 @@ def _params() -> dict[str, float]:
         "n_soft_lock_radius": 16.0,
         "r_soft_lock_radius": 17.0,
         "e_soft_lock_radius": 18.0,
-        "n_predict_mult": 0.055,
-        "r_predict_mult": 0.05,
-        "e_predict_mult": 0.025,
         "n_prio_coin": 1.0,
         "r_prio_coin": 2.0,
         "e_prio_coin": 4.0,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,7 +12,7 @@ import cv2
 import numpy as np
 
 from autozuma.control.execution import ExecutionPlan
-from autozuma.core.models import Command, LevelDetectionResult, Point, TargetCandidate
+from autozuma.core.models import Cluster, Command, LevelDetectionResult, Point, TargetCandidate
 from autozuma.decision.static_frame import StaticFrameDecisionResult
 from autozuma.runtime.session import StaticSessionFrameResult, StaticSessionPhase
 
@@ -36,10 +35,7 @@ class DebugOutputResult:
     """Files produced for one debug snapshot."""
 
     output_dir: Path
-    frame_path: Path
-    summary_path: Path
-    roi_path: Path | None = None
-    overlay_path: Path | None = None
+    overlay_path: Path
 
 
 @dataclass(frozen=True)
@@ -55,36 +51,16 @@ class FileDebugOutputSink:
         session_result: StaticSessionFrameResult,
         current_time: float,
     ) -> DebugOutputResult:
-        output_dir = _unique_output_dir(
+        self.root.mkdir(parents=True, exist_ok=True)
+        overlay_path = _unique_overlay_path(
             root=self.root,
             current_time=current_time,
             level_id=session_result.state.level_id,
         )
-        output_dir.mkdir(parents=True, exist_ok=False)
-
-        frame_path = output_dir / "frame.png"
-        _write_bgr_image(frame_path, frame_bgr)
-
-        roi_path: Path | None = None
-        overlay_path: Path | None = None
-        decision = _decision_result(session_result)
-        if decision is not None:
-            roi_path = output_dir / "roi.png"
-            overlay_path = output_dir / "roi_overlay.png"
-            _write_bgr_image(roi_path, decision.roi_result.frame)
-            _write_bgr_image(overlay_path, render_static_decision_overlay(decision))
-
-        summary_path = output_dir / "summary.json"
-        summary_path.write_text(
-            json.dumps(build_debug_summary(session_result, current_time), indent=2),
-            encoding="utf-8",
-        )
+        _write_bgr_image(overlay_path, render_static_session_overlay(frame_bgr, session_result))
 
         return DebugOutputResult(
-            output_dir=output_dir,
-            frame_path=frame_path,
-            summary_path=summary_path,
-            roi_path=roi_path,
+            output_dir=self.root,
             overlay_path=overlay_path,
         )
 
@@ -146,7 +122,50 @@ def render_static_decision_overlay(decision: StaticFrameDecisionResult) -> np.nd
         next_pos = (int(round(frog.next_position.x)), int(round(frog.next_position.y)))
         cv2.circle(overlay, next_pos, 6, (255, 255, 255), 1, lineType=cv2.LINE_AA)
 
+    _draw_playable_cluster_aims(overlay, decision)
     return overlay
+
+
+def _draw_playable_cluster_aims(
+    overlay: np.ndarray,
+    decision: StaticFrameDecisionResult,
+) -> None:
+    for candidate in decision.aim_candidates:
+        cluster = _candidate_cluster(candidate, decision.world_state.clusters)
+        if cluster is None:
+            continue
+        base_color = _color_for_entity(cluster.color)
+        aim_color = _darker_color(base_color)
+        for entity in cluster.entities:
+            cv2.circle(
+                overlay,
+                (int(round(entity.x)), int(round(entity.y))),
+                6,
+                base_color,
+                -1,
+                lineType=cv2.LINE_AA,
+            )
+        _draw_x_marker(overlay, Point(x=candidate.x, y=candidate.y), aim_color)
+
+
+def _candidate_cluster(
+    candidate: TargetCandidate,
+    clusters: tuple[Cluster, ...],
+) -> Cluster | None:
+    if (
+        candidate.track_id is None
+        or candidate.cluster_start_idx is None
+        or candidate.cluster_end_idx is None
+    ):
+        return None
+    for cluster in clusters:
+        if (
+            cluster.track_id == candidate.track_id
+            and cluster.start_idx == candidate.cluster_start_idx
+            and cluster.end_idx == candidate.cluster_end_idx
+        ):
+            return cluster
+    return None
 
 
 def render_static_session_overlay(
@@ -215,7 +234,7 @@ def _host_summary(session_result: StaticSessionFrameResult) -> dict[str, object]
         "candidates": {
             "current_count": len(decision.current_candidates),
             "next_count": len(decision.next_candidates),
-            "predicted_count": len(decision.predicted_candidates),
+            "aim_candidate_count": len(decision.aim_candidates),
             "swap_reason": decision.swap_decision.reason,
             "swap_selected": decision.swap_decision.should_swap,
         },
@@ -367,6 +386,28 @@ def _draw_crosshair(overlay: np.ndarray, point: Point, color: tuple[int, int, in
     cv2.line(overlay, (x, y - 16), (x, y + 16), color, 1, lineType=cv2.LINE_AA)
 
 
+def _draw_x_marker(overlay: np.ndarray, point: Point, color: tuple[int, int, int]) -> None:
+    x = int(round(point.x))
+    y = int(round(point.y))
+    radius = 6
+    cv2.line(
+        overlay,
+        (x - radius, y - radius),
+        (x + radius, y + radius),
+        color,
+        2,
+        lineType=cv2.LINE_AA,
+    )
+    cv2.line(
+        overlay,
+        (x - radius, y + radius),
+        (x + radius, y - radius),
+        color,
+        2,
+        lineType=cv2.LINE_AA,
+    )
+
+
 def _write_bgr_image(path: Path, image_bgr: np.ndarray) -> None:
     ok, buffer = cv2.imencode(path.suffix, image_bgr)
     if not ok:
@@ -374,17 +415,17 @@ def _write_bgr_image(path: Path, image_bgr: np.ndarray) -> None:
     buffer.tofile(path)
 
 
-def _unique_output_dir(root: Path, current_time: float, level_id: str | None) -> Path:
-    base_name = _output_dir_name(current_time, level_id)
-    candidate = root / base_name
+def _unique_overlay_path(root: Path, current_time: float, level_id: str | None) -> Path:
+    base_name = _output_file_stem(current_time, level_id)
+    candidate = root / f"{base_name}_overlay.png"
     suffix = 1
     while candidate.exists():
-        candidate = root / f"{base_name}_{suffix:02d}"
+        candidate = root / f"{base_name}_{suffix:02d}_overlay.png"
         suffix += 1
     return candidate
 
 
-def _output_dir_name(current_time: float, level_id: str | None) -> str:
+def _output_file_stem(current_time: float, level_id: str | None) -> str:
     timestamp = datetime.fromtimestamp(current_time).strftime("%Y%m%d_%H%M%S")
     milliseconds = int((current_time % 1.0) * 1000)
     level = _safe_path_token(level_id or StaticSessionPhase.DETECTING.value)
@@ -404,3 +445,7 @@ def _color_for_entity(color: str) -> tuple[int, int, int]:
         "purple": (255, 0, 255),
         "white": (255, 255, 255),
     }.get(color, (180, 180, 180))
+
+
+def _darker_color(color: tuple[int, int, int]) -> tuple[int, int, int]:
+    return tuple(max(0, int(channel * 0.55)) for channel in color)

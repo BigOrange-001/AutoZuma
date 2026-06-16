@@ -25,7 +25,7 @@ def test_gui_schema_groups_mode_scoped_parameters():
     assert len(by_mode[GuiParameterMode.RESCUE]) == len(by_mode[GuiParameterMode.ENDGAME])
     assert any(parameter.key == "n_fire_cooldown" for parameter in by_mode[GuiParameterMode.NORMAL])
     assert any(parameter.key == "r_prio_combo" for parameter in by_mode[GuiParameterMode.RESCUE])
-    assert any(parameter.key == "e_predict_radius_th" for parameter in by_mode[GuiParameterMode.ENDGAME])
+    assert not any("predict" in parameter.key for parameter in schema)
 
 
 def test_gui_schema_marks_toggles_and_ranks_for_appropriate_controls():
