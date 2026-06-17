@@ -29,6 +29,7 @@ def test_build_runtime_strategy_config_maps_normal_mode_values():
     assert frame.target_scoring.pair_priority == 10.0
 
     assert config.stateful_decision.outcome.fire_cooldown == 0.44
+    assert config.stateful_decision.outcome.soft_lock_ttl == 0.11
     assert config.stateful_decision.outcome.combo_hang_base == 0.2
     assert config.stateful_decision.outcome.combo_hang_mult == 0.0
     assert config.stateful_decision.outcome.breakthrough_delay == 0.25
@@ -98,6 +99,9 @@ def _params() -> dict[str, float]:
         "n_combo_hang_mult": 0.0,
         "r_combo_hang_mult": 0.0,
         "e_combo_hang_mult": 0.0,
+        "n_soft_lock_ttl": 0.11,
+        "r_soft_lock_ttl": 0.12,
+        "e_soft_lock_ttl": 0.13,
         "n_soft_lock_radius": 16.0,
         "r_soft_lock_radius": 17.0,
         "e_soft_lock_radius": 18.0,

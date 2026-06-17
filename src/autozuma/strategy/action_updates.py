@@ -45,11 +45,14 @@ class CommandOutcomeParams:
     bullet_speed: float = 800.0
     fire_cooldown: float = 0.3
     swap_fire_extra_delay: float = 0.05
-    combo_hang_base: float = 0.8
-    combo_hang_mult: float = 0.6
-    combo_lock_track_radius: int = 150
+    soft_lock_ttl: float = 0.1
+    target_cluster_lock_padding: int = 30
+    combo_hang_base: float = 0.5
+    combo_hang_mult: float = 0.2
     adjacent_combo_lock_padding: int = 80
-    adjacent_combo_lock_extra: float = 0.5
+    adjacent_combo_lock_extra: float = 0.0
+    rollback_tail_lock_duration: float = 0.4
+    tail_lock_start_padding: int = 20
     direct_coin_lock_duration: float = 1.0
     breakthrough_coin_lock_duration: float = 2.0
     breakthrough_delay: float = 0.25
@@ -148,6 +151,14 @@ def apply_command_outcome(
                 duration=lock_duration,
                 params=params,
             )
+            action_tracker = _add_tail_lock(
+                state=action_tracker,
+                target=selected_target,
+                level=level,
+                current_time=current_time,
+                duration=lock_duration,
+                start_padding=0,
+            )
             action_tracker = add_deadzone(
                 action_tracker,
                 point=Point(x=selected_target.x, y=selected_target.y),
@@ -157,12 +168,29 @@ def apply_command_outcome(
             next_fire_ready_time = current_time + lock_duration + swap_extra
 
         case target_type if target_type in {ELIM_TARGET, ROLLBACK_ELIM_TARGET}:
+            lock_duration = travel_time + params.soft_lock_ttl
             action_tracker = add_deadzone(
                 action_tracker,
                 point=Point(x=selected_target.x, y=selected_target.y),
                 current_time=current_time,
-                duration=travel_time,
+                duration=lock_duration,
             )
+            action_tracker = _add_target_cluster_lock(
+                state=action_tracker,
+                target=selected_target,
+                current_time=current_time,
+                duration=lock_duration,
+                params=params,
+            )
+            if selected_target.target_type == ROLLBACK_ELIM_TARGET:
+                action_tracker = _add_tail_lock(
+                    state=action_tracker,
+                    target=selected_target,
+                    level=level,
+                    current_time=current_time,
+                    duration=params.rollback_tail_lock_duration,
+                    start_padding=params.tail_lock_start_padding,
+                )
             next_fire_ready_time = current_time + params.fire_cooldown + swap_extra
 
         case target_type if target_type == PAIR_TARGET:
@@ -220,25 +248,19 @@ def _add_combo_locks(
     if target.track_id is None or target.track_idx is None:
         return state
 
-    state = add_cluster_lock(
-        state,
-        track_id=target.track_id,
-        start_idx=target.track_idx - params.combo_lock_track_radius,
-        end_idx=target.track_idx + params.combo_lock_track_radius,
+    state = _add_target_cluster_lock(
+        state=state,
+        target=target,
         current_time=current_time,
         duration=duration,
+        params=params,
     )
 
     target_cluster_idx = _target_cluster_index(target, world_state)
     if target_cluster_idx is None:
         return state
 
-    for adjacent_idx in (
-        _previous_known_cluster_idx(world_state, target_cluster_idx - 1),
-        _next_known_cluster_idx(world_state, target_cluster_idx + 1),
-    ):
-        if adjacent_idx is None:
-            continue
+    for adjacent_idx in _combo_chain_cluster_indices(world_state, target_cluster_idx):
         cluster = world_state.clusters[adjacent_idx]
         state = add_cluster_lock(
             state,
@@ -250,6 +272,96 @@ def _add_combo_locks(
         )
 
     return state
+
+
+def _add_target_cluster_lock(
+    *,
+    state: ActionTrackerState,
+    target: TargetCandidate,
+    current_time: float,
+    duration: float,
+    params: CommandOutcomeParams,
+) -> ActionTrackerState:
+    if target.track_id is None or target.track_idx is None:
+        return state
+
+    start_idx = (
+        target.cluster_start_idx if target.cluster_start_idx is not None else target.track_idx
+    )
+    end_idx = target.cluster_end_idx if target.cluster_end_idx is not None else target.track_idx
+    return add_cluster_lock(
+        state,
+        track_id=target.track_id,
+        start_idx=start_idx - params.target_cluster_lock_padding,
+        end_idx=end_idx + params.target_cluster_lock_padding,
+        current_time=current_time,
+        duration=duration,
+    )
+
+
+def _add_tail_lock(
+    *,
+    state: ActionTrackerState,
+    target: TargetCandidate,
+    level: LevelRuntimeAssets,
+    current_time: float,
+    duration: float,
+    start_padding: int,
+) -> ActionTrackerState:
+    if target.track_id is None or target.track_idx is None or duration <= 0.0:
+        return state
+
+    track_end_idx = _track_end_idx(level, target.track_id)
+    if track_end_idx is None or target.track_idx >= track_end_idx:
+        return state
+
+    return add_cluster_lock(
+        state,
+        track_id=target.track_id,
+        start_idx=target.track_idx - start_padding,
+        end_idx=track_end_idx,
+        current_time=current_time,
+        duration=duration,
+    )
+
+
+def _track_end_idx(level: LevelRuntimeAssets, track_id: int) -> int | None:
+    for track in level.geometry.tracks:
+        if track.track_id == track_id and track.points:
+            return len(track.points) - 1
+    return None
+
+
+def _combo_chain_cluster_indices(
+    world_state: WorldState,
+    target_cluster_idx: int,
+) -> tuple[int, ...]:
+    clusters = world_state.clusters
+    target = clusters[target_cluster_idx]
+    chain_indices: list[int] = []
+    left_idx = target_cluster_idx - 1
+    right_idx = target_cluster_idx + 1
+
+    while True:
+        left_idx = _previous_known_cluster_idx(world_state, left_idx)
+        right_idx = _next_known_cluster_idx(world_state, right_idx)
+        if left_idx is None or right_idx is None:
+            break
+
+        left = clusters[left_idx]
+        right = clusters[right_idx]
+        if (
+            left.track_id == right.track_id == target.track_id
+            and left.color == right.color
+            and left.size + right.size >= 3
+        ):
+            chain_indices.append(right_idx)
+            left_idx -= 1
+            right_idx += 1
+            continue
+        break
+
+    return tuple(chain_indices)
 
 
 def _target_cluster_index(target: TargetCandidate, world_state: WorldState) -> int | None:

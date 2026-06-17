@@ -227,6 +227,32 @@ def test_score_basic_targets_skips_cluster_inside_active_cluster_lock():
     assert targets == ()
 
 
+def test_score_basic_targets_allows_entry_side_cluster_before_forward_lock():
+    entry_side_cluster = _cluster("red", 2, 30)
+    spacer_cluster = _cluster("blue", 1, 60)
+    endpoint_side_cluster = _cluster("red", 2, 90)
+    world_state = _world_state(
+        current_ball="red",
+        clusters=(entry_side_cluster, spacer_cluster, endpoint_side_cluster),
+    )
+
+    targets = score_basic_targets(
+        world_state=world_state,
+        level=_level(),
+        params=TargetScoringParams(
+            action_state=ActionTrackerState(
+                cluster_locks=(
+                    ClusterLock(track_id=0, start_idx=70, end_idx=120, expires_at=12.0),
+                )
+            ),
+            current_time=10.0,
+        ),
+    )
+
+    assert len(targets) == 1
+    assert targets[0].cluster_start_idx == 30
+
+
 def test_score_basic_targets_uses_reachable_subset_for_aim_point():
     blocked = BallEntity(x=100.0, y=0.0, track_id=0, track_idx=100, color="red")
     also_blocked = BallEntity(x=110.0, y=0.0, track_id=0, track_idx=110, color="red")
