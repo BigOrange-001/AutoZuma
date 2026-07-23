@@ -39,10 +39,12 @@ class Win32CommandExecutor:
             self._send_physical_left_click(target, move_delay=0.01, click_delay=0.02)
 
     def ui_click(self, target: Point) -> None:
-        if self.use_virtual:
-            self._send_virtual_left_click(target, move_delay=0.05, click_delay=0.05)
-        else:
-            self._send_physical_left_click(target, move_delay=0.05, click_delay=0.05)
+        # PopCap UI buttons can visually depress on synthetic window messages
+        # while rejecting the release when the real cursor or foreground window
+        # does not agree. Keep gameplay virtual when requested, but use a normal
+        # foreground click for menus and result-dialog buttons.
+        self._focus_game_window()
+        self._send_physical_left_click(target, move_delay=0.08, click_delay=0.12)
 
     def right_click(self) -> None:
         if self.use_virtual:
@@ -52,6 +54,17 @@ class Win32CommandExecutor:
 
     def wait(self, delay_ms: int) -> None:
         time.sleep(delay_ms / 1000.0)
+
+    def _focus_game_window(self) -> None:
+        _, _, win32gui = _import_pywin32()
+        if win32gui.GetForegroundWindow() == self.hwnd:
+            return
+        try:
+            activated = win32gui.SetForegroundWindow(self.hwnd)
+        except Exception:  # noqa: BLE001 - physical click may still work if focus is denied.
+            return
+        if activated is not False:
+            time.sleep(0.05)
 
     def _send_virtual_left_click(
         self,

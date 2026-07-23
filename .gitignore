@@ -21,6 +21,8 @@ build/
 screenshot/
 debug_records/
 debug/
+grade/*
+!grade/README.md
 config/gui_settings.json
 
 .idea/

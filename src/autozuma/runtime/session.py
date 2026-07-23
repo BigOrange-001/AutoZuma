@@ -13,8 +13,30 @@ from autozuma.control.execution import (
     build_command_execution_plan,
     execute_plan,
 )
-from autozuma.core.models import AssetRegistry, LauncherTemplateSet, LevelDetectionResult
+from autozuma.core.models import (
+    AssetRegistry,
+    Command,
+    CommandType,
+    LauncherTemplateSet,
+    LevelDetectionResult,
+)
+from autozuma.runtime.grade import (
+    FileGradeArchive,
+    GameOverCaptureResult,
+    GradeCaptureParams,
+    GradeCaptureResult,
+    GradeCaptureState,
+    GradeCaptureStatus,
+    capture_completed_level,
+    capture_game_over,
+)
 from autozuma.runtime.host import StaticHostFrameParams, StaticHostFrameResult, run_static_host_frame
+from autozuma.runtime.menu import (
+    AdventureMenuFrameResult,
+    AdventureMenuParams,
+    AdventureMenuState,
+    run_adventure_menu_frame,
+)
 from autozuma.runtime.static_runtime import StaticRuntimeState, initial_static_runtime_state
 from autozuma.runtime.ui import (
     UiAutomationFrameResult,
@@ -39,6 +61,8 @@ class StaticSessionState:
     runtime_state: StaticRuntimeState | None = None
     last_map_detect_time: float = 0.0
     ui_state: UiAutomationState = UiAutomationState()
+    grade_state: GradeCaptureState = GradeCaptureState()
+    menu_state: AdventureMenuState = AdventureMenuState()
 
 
 @dataclass(frozen=True)
@@ -49,6 +73,8 @@ class StaticSessionParams:
     level_min_confidence: float = STATIC_LEVEL_MATCH_THRESHOLD
     map_redetect_interval: float = 4.0
     ui: UiAutomationParams = UiAutomationParams()
+    grade: GradeCaptureParams = GradeCaptureParams()
+    menu: AdventureMenuParams = AdventureMenuParams()
 
 
 @dataclass(frozen=True)
@@ -57,6 +83,11 @@ class StaticSessionUiResult:
 
     automation: UiAutomationFrameResult
     execution_plan: ExecutionPlan
+    grade_state: GradeCaptureState = GradeCaptureState()
+    grade_capture: GradeCaptureResult | None = None
+    game_over_capture: GameOverCaptureResult | None = None
+    menu_state: AdventureMenuState = AdventureMenuState()
+    menu: AdventureMenuFrameResult | None = None
 
 
 @dataclass(frozen=True)
@@ -95,15 +126,29 @@ def run_static_session_frame(
         driver=driver,
     )
     if ui_result.automation.should_skip_gameplay:
-        next_state = replace(state, ui_state=ui_result.automation.state)
+        next_state = replace(
+            state,
+            ui_state=ui_result.automation.state,
+            grade_state=ui_result.grade_state,
+            menu_state=ui_result.menu_state,
+        )
         if ui_result.automation.reset_session:
-            next_state = StaticSessionState(ui_state=ui_result.automation.state)
+            next_state = StaticSessionState(
+                ui_state=ui_result.automation.state,
+                grade_state=ui_result.grade_state,
+                menu_state=ui_result.menu_state,
+            )
         return StaticSessionFrameResult(
             state=next_state,
             ui_result=ui_result,
         )
 
-    state = replace(state, ui_state=ui_result.automation.state)
+    state = replace(
+        state,
+        ui_state=ui_result.automation.state,
+        grade_state=ui_result.grade_state,
+        menu_state=ui_result.menu_state,
+    )
     if state.phase is StaticSessionPhase.DETECTING:
         result = _detect_initial_level(
             frame_bgr=frame_bgr,
@@ -126,6 +171,8 @@ def run_static_session_frame(
             state=StaticSessionState(
                 last_map_detect_time=current_time,
                 ui_state=active_state.ui_state,
+                grade_state=active_state.grade_state,
+                menu_state=active_state.menu_state,
             ),
             detection_result=detection_result,
             ui_result=ui_result,
@@ -165,6 +212,32 @@ def _run_ui_frame(
         current_time=current_time,
         params=params.ui,
     )
+    automation, grade_state, grade_capture, game_over_capture = (
+        _capture_outcome_before_click(
+            frame_bgr=frame_bgr,
+            state=state,
+            current_time=current_time,
+            params=params,
+            automation=automation,
+        )
+    )
+    menu_result = None
+    menu_state = state.menu_state
+    if not automation.should_skip_gameplay and state.phase is StaticSessionPhase.DETECTING:
+        menu_result = run_adventure_menu_frame(
+            frame_bgr=frame_bgr,
+            state=state.menu_state,
+            current_time=current_time,
+            params=params.menu,
+        )
+        menu_state = menu_result.state
+        if menu_result.detected:
+            automation = replace(
+                automation,
+                command=menu_result.command,
+                should_skip_gameplay=True,
+                reset_session=False,
+            )
     execution_plan = build_command_execution_plan(
         automation.command,
         swap_delay_ms=params.host.swap_delay_ms,
@@ -174,6 +247,109 @@ def _run_ui_frame(
     return StaticSessionUiResult(
         automation=automation,
         execution_plan=execution_plan,
+        grade_state=grade_state,
+        grade_capture=grade_capture,
+        game_over_capture=game_over_capture,
+        menu_state=menu_state,
+        menu=menu_result,
+    )
+
+
+def _capture_outcome_before_click(
+    *,
+    frame_bgr: np.ndarray,
+    state: StaticSessionState,
+    current_time: float,
+    params: StaticSessionParams,
+    automation: UiAutomationFrameResult,
+) -> tuple[
+    UiAutomationFrameResult,
+    GradeCaptureState,
+    GradeCaptureResult | None,
+    GameOverCaptureResult | None,
+]:
+    detection = automation.detection_result
+    if detection is None or detection.template_id != "ok":
+        return automation, state.grade_state, None, None
+
+    grade_capture = capture_completed_level(
+        frame_bgr=frame_bgr,
+        ok_target=detection.target,
+        level_id=state.level_id,
+        raw_values=params.host.runtime.raw_values,
+        current_time=current_time,
+        params=params.grade,
+        recorded_fingerprint=state.grade_state.recorded_fingerprint,
+    )
+    game_over_capture = None
+    capture: GradeCaptureResult | GameOverCaptureResult = grade_capture
+    if grade_capture.status is GradeCaptureStatus.NOT_STATS:
+        game_over_capture = capture_game_over(
+            frame_bgr=frame_bgr,
+            ok_target=detection.target,
+            level_id=state.level_id,
+            raw_values=params.host.runtime.raw_values,
+            current_time=current_time,
+            params=params.grade,
+            recorded_fingerprint=state.grade_state.recorded_fingerprint,
+        )
+        capture = game_over_capture
+    if capture.status is GradeCaptureStatus.NOT_STATS:
+        return automation, GradeCaptureState(), grade_capture, game_over_capture
+    if capture.status in {GradeCaptureStatus.RECORDED, GradeCaptureStatus.DUPLICATE}:
+        return (
+            automation,
+            GradeCaptureState(recorded_fingerprint=capture.fingerprint),
+            grade_capture,
+            game_over_capture,
+        )
+
+    retry_count = state.grade_state.retry_count + 1
+    grade_state = GradeCaptureState(
+        recorded_fingerprint=state.grade_state.recorded_fingerprint,
+        retry_count=retry_count,
+    )
+    if retry_count < max(1, params.grade.max_parse_attempts):
+        return (
+            _defer_ui_click(
+                automation,
+                current_time=current_time,
+                retry_interval=params.grade.retry_interval,
+            ),
+            grade_state,
+            grade_capture,
+            game_over_capture,
+        )
+
+    try:
+        FileGradeArchive(root=params.grade.root).save_failure(
+            frame_bgr=frame_bgr,
+            current_time=current_time,
+            error=capture.error or "unknown STATS recognition failure",
+        )
+    except (OSError, ValueError):
+        pass
+    return automation, GradeCaptureState(), grade_capture, game_over_capture
+
+
+def _defer_ui_click(
+    automation: UiAutomationFrameResult,
+    *,
+    current_time: float,
+    retry_interval: float,
+) -> UiAutomationFrameResult:
+    if automation.command.command_type is not CommandType.UI_CLICK:
+        return automation
+    deferred_state = replace(
+        automation.state,
+        click_count=automation.state.click_count + 1,
+        next_click_time=current_time + max(0.01, retry_interval),
+    )
+    return replace(
+        automation,
+        state=deferred_state,
+        command=Command(command_type=CommandType.NO_OP),
+        reset_session=False,
     )
 
 
@@ -200,6 +376,8 @@ def _detect_initial_level(
             runtime_state=initial_static_runtime_state(current_time),
             last_map_detect_time=current_time,
             ui_state=state.ui_state,
+            grade_state=state.grade_state,
+            menu_state=state.menu_state,
         ),
         detection_result=detection_result,
         level_changed=True,
@@ -233,6 +411,8 @@ def _maybe_redetect_level(
             runtime_state=initial_static_runtime_state(current_time),
             last_map_detect_time=current_time,
             ui_state=state.ui_state,
+            grade_state=state.grade_state,
+            menu_state=state.menu_state,
         ),
         detection_result,
         True,
