@@ -29,7 +29,7 @@ from autozuma.strategy.actions import (
     VirtualBall,
 )
 from autozuma.strategy.coins import BREAKTHROUGH_COIN_TARGET, DIRECT_COIN_TARGET
-from autozuma.strategy.targets import COMBO_TARGET, ELIM_TARGET, PAIR_TARGET
+from autozuma.strategy.targets import COMBO_TARGET, ELIM_TARGET, PAIR_TARGET, ROLLBACK_ELIM_TARGET
 from autozuma.vision.coins import CoinLock, CoinTrackerState
 from autozuma.vision.colors import UNKNOWN_COLOR
 
@@ -66,15 +66,90 @@ def test_apply_command_outcome_adds_combo_locks_and_cooldown():
     )
 
     assert updated.action_tracker.deadzones == (
-        Deadzone(point=Point(x=80.0, y=60.0), expires_at=12.125),
+        Deadzone(point=Point(x=80.0, y=60.0), expires_at=11.025),
     )
     assert updated.action_tracker.cluster_locks == (
-        ClusterLock(track_id=1, start_idx=-40, end_idx=260, expires_at=12.125),
-        ClusterLock(track_id=1, start_idx=-30, end_idx=140, expires_at=12.625),
-        ClusterLock(track_id=1, start_idx=70, end_idx=240, expires_at=12.625),
+        ClusterLock(track_id=1, start_idx=70, end_idx=150, expires_at=11.025),
+        ClusterLock(track_id=1, start_idx=70, end_idx=240, expires_at=11.025),
     )
-    assert updated.next_fire_ready_time == 12.125
+    assert updated.next_fire_ready_time == 11.025
     assert updated.last_fire_time == 10.0
+
+
+def test_apply_command_outcome_combo_locks_only_forward_predicted_chain():
+    world_state = _world_state(
+        clusters=(
+            _cluster("red", track_id=1, start_idx=10, end_idx=20),
+            _cluster("blue", track_id=1, start_idx=40, end_idx=50),
+            _cluster("green", track_id=1, start_idx=70, end_idx=80),
+            _cluster("blue", track_id=1, start_idx=100, end_idx=110),
+            _cluster("red", track_id=1, start_idx=130, end_idx=140),
+        )
+    )
+    target = TargetCandidate(
+        x=0.0,
+        y=80.0,
+        score=100.0,
+        target_type=COMBO_TARGET,
+        combo_depth=2,
+        track_id=1,
+        track_idx=75,
+        cluster_start_idx=70,
+        cluster_end_idx=80,
+    )
+
+    updated = apply_command_outcome(
+        state=CommandOutcomeState(),
+        command=Command(command_type=CommandType.SHOOT, primary_target=Point(x=0, y=80)),
+        selected_target=target,
+        world_state=world_state,
+        level=_level(),
+        current_time=10.0,
+    )
+
+    locked_ranges = {
+        (lock.start_idx, lock.end_idx)
+        for lock in updated.action_tracker.cluster_locks
+    }
+    assert locked_ranges == {
+        (40, 110),
+        (20, 190),
+        (50, 220),
+    }
+
+
+def test_apply_command_outcome_combo_adds_short_tail_lock_when_track_end_is_known():
+    world_state = _world_state(
+        clusters=(
+            _cluster("blue", track_id=1, start_idx=20, end_idx=30),
+            _cluster("red", track_id=1, start_idx=60, end_idx=70),
+            _cluster("blue", track_id=1, start_idx=100, end_idx=110),
+        )
+    )
+    target = TargetCandidate(
+        x=0.0,
+        y=80.0,
+        score=100.0,
+        target_type=COMBO_TARGET,
+        combo_depth=1,
+        track_id=1,
+        track_idx=65,
+        cluster_start_idx=60,
+        cluster_end_idx=70,
+    )
+
+    updated = apply_command_outcome(
+        state=CommandOutcomeState(),
+        command=Command(command_type=CommandType.SHOOT, primary_target=Point(x=0, y=80)),
+        selected_target=target,
+        world_state=world_state,
+        level=_level_with_track_end(201),
+        current_time=10.0,
+    )
+
+    assert ClusterLock(track_id=1, start_idx=65, end_idx=200, expires_at=10.8) in (
+        updated.action_tracker.cluster_locks
+    )
 
 
 def test_apply_command_outcome_adds_pair_virtual_ball_with_swapped_color():
@@ -231,9 +306,39 @@ def test_apply_command_outcome_elim_uses_fire_cooldown_after_deadzone():
     )
 
     assert updated.action_tracker.deadzones == (
-        Deadzone(point=Point(x=0.0, y=80.0), expires_at=10.1),
+        Deadzone(point=Point(x=0.0, y=80.0), expires_at=10.2),
+    )
+    assert updated.action_tracker.cluster_locks == (
+        ClusterLock(track_id=1, start_idx=20, end_idx=80, expires_at=10.2),
     )
     assert updated.next_fire_ready_time == 10.3
+
+
+def test_apply_command_outcome_rollback_locks_tail_near_track_end():
+    target = TargetCandidate(
+        x=0.0,
+        y=80.0,
+        score=10.0,
+        target_type=ROLLBACK_ELIM_TARGET,
+        track_id=1,
+        track_idx=50,
+        cluster_start_idx=45,
+        cluster_end_idx=55,
+    )
+
+    updated = apply_command_outcome(
+        state=CommandOutcomeState(),
+        command=Command(command_type=CommandType.SHOOT, primary_target=Point(x=0, y=80)),
+        selected_target=target,
+        world_state=_world_state(),
+        level=_level_with_track_end(201),
+        current_time=10.0,
+    )
+
+    assert updated.action_tracker.cluster_locks == (
+        ClusterLock(track_id=1, start_idx=15, end_idx=85, expires_at=10.2),
+        ClusterLock(track_id=1, start_idx=30, end_idx=200, expires_at=10.4),
+    )
 
 
 def _world_state(
@@ -270,6 +375,26 @@ def _level() -> LevelRuntimeAssets:
             level_id="test",
             tracks=(TrackGeometry(track_id=1, points=(), cumulative_distances=()),),
         ),
+        background=None,
+    )
+
+
+def _level_with_track_end(point_count: int) -> LevelRuntimeAssets:
+    track = TrackGeometry(
+        track_id=1,
+        points=tuple(Point(x=float(index), y=0.0) for index in range(point_count)),
+        cumulative_distances=tuple(float(index) for index in range(point_count)),
+    )
+    return LevelRuntimeAssets(
+        level_id="test",
+        topology=LevelTopology(
+            level_id="test",
+            frog_pivot=Point(x=0.0, y=0.0),
+            tracks=(),
+            treasure_points=(),
+            source_path=Path("test.json"),
+        ),
+        geometry=LevelGeometry(level_id="test", tracks=(track,)),
         background=None,
     )
 

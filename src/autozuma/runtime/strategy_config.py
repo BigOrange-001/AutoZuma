@@ -45,6 +45,7 @@ def build_runtime_strategy_config(
     fire_cooldown = resolver.get("FIRE_COOLDOWN", mode)
     combo_hang_base = resolver.get("COMBO_HANG_BASE", mode)
     combo_hang_mult = resolver.get("COMBO_HANG_MULT", mode)
+    soft_lock_ttl = resolver.get("SOFT_LOCK_TTL", mode)
     soft_lock_radius = resolver.get("SOFT_LOCK_RADIUS", mode)
     coin_break_delay = resolver.get("COIN_BREAK_DELAY", mode)
 
@@ -78,6 +79,7 @@ def build_runtime_strategy_config(
             frame_decision=frame_decision,
             outcome=CommandOutcomeParams(
                 fire_cooldown=fire_cooldown,
+                soft_lock_ttl=soft_lock_ttl,
                 combo_hang_base=combo_hang_base,
                 combo_hang_mult=combo_hang_mult,
                 breakthrough_delay=coin_break_delay,

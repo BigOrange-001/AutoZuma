@@ -239,8 +239,13 @@ GENERAL_PARAMETERS: tuple[GuiParameterDefinition, ...] = (
         minimum=0.0,
         maximum=1.0,
         step=1.0,
-        description="Use virtual/background click messages when enabled.",
-        description_zh="启用后使用后台虚拟点击消息，而不是直接前台物理点击。",
+        description=(
+            "Use virtual/background clicks for gameplay. Menus and result buttons "
+            "always use reliable foreground clicks."
+        ),
+        description_zh=(
+            "启用后游戏射击使用后台虚拟点击；菜单和结算按钮始终使用可靠的前台点击。"
+        ),
     ),
     GuiParameterDefinition(
         key="detailed_analysis",

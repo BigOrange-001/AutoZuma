@@ -21,6 +21,7 @@ AutoZumaNext/
 
 See `docs/assets.md` for the migrated visual/topology asset inventory.
 See `docs/session_handoff.md` for the current refactor status and next-step guidance.
+See `AGENTS.md` for repository test policy and targeted test commands.
 
 ## Launch
 
@@ -40,6 +41,36 @@ Default runtime controls:
 
 The GUI also has matching buttons. F1/F2/F3 are polled as global Win32 hotkeys,
 so they work while the game window has focus.
+
+## Completed-level grade collection
+
+When the existing UI automation detects the green `OK` button on a completed-level
+`STATS` screen, AutoZuma now reads and archives the result before clicking the button.
+The parser anchors every STATS field to the detected OK-button position, so dragging
+the result panel does not change the field locations.
+
+Gameplay can still use virtual/background mouse input, but menu and result-dialog
+buttons use a focused physical click. This avoids the Zuma UI accepting the pressed
+animation while rejecting a synthetic button release.
+
+Results are created lazily under `grade/`:
+
+- One append-only CSV per campaign level, for example `grade/1-1.csv`.
+- One source screenshot per recorded row under `grade/screenshots/<level>/`.
+- One GAME OVER CSV per failed campaign level under `grade/gameover/`, with
+  matching screenshots under `grade/gameover/screenshots/<level>/`.
+- Failed OCR evidence under `grade/failed/` after the configured retry limit.
+
+CSV rows contain only values read from the result screen. The level is encoded by
+the CSV filename, so timestamps, internal map IDs, screenshot paths, OCR diagnostics,
+and runtime parameter snapshots are not written into the table. Campaign IDs are
+accepted only for levels 1-1 through 3-5, 4-1 through 6-6, 7-1 through 12-7, and
+13-1.
+
+While the session is detecting rather than actively playing, AutoZuma also checks
+for the Adventure stage menu. A screen is accepted only when both `ADVENTURE` and
+`PLAY` are recognized; AutoZuma then clicks the stage doorway at the configured
+640×480 client coordinate `(251, 335)`. Repeated clicks are throttled.
 
 ## Migration Rule
 

@@ -250,6 +250,9 @@ def _ui_summary(session_result: StaticSessionFrameResult) -> dict[str, object] |
     if session_result.ui_result is None:
         return None
     automation = session_result.ui_result.automation
+    grade_capture = session_result.ui_result.grade_capture
+    game_over_capture = session_result.ui_result.game_over_capture
+    menu_result = session_result.ui_result.menu
     return {
         "state": {
             "last_poll_time": automation.state.last_poll_time,
@@ -270,6 +273,65 @@ def _ui_summary(session_result: StaticSessionFrameResult) -> dict[str, object] |
         "should_skip_gameplay": automation.should_skip_gameplay,
         "reset_session": automation.reset_session,
         "execution_plan": _execution_plan_summary(session_result.ui_result.execution_plan),
+        "grade_capture": (
+            None
+            if grade_capture is None
+            else {
+                "status": grade_capture.status.value,
+                "fingerprint": grade_capture.fingerprint,
+                "error": grade_capture.error,
+                "grade": None if grade_capture.stats is None else grade_capture.stats.grade,
+                "csv_path": (
+                    None
+                    if grade_capture.archive is None
+                    else str(grade_capture.archive.csv_path)
+                ),
+                "screenshot_path": (
+                    None
+                    if grade_capture.archive is None
+                    or grade_capture.archive.screenshot_path is None
+                    else str(grade_capture.archive.screenshot_path)
+                ),
+            }
+        ),
+        "game_over_capture": (
+            None
+            if game_over_capture is None
+            else {
+                "status": game_over_capture.status.value,
+                "fingerprint": game_over_capture.fingerprint,
+                "error": game_over_capture.error,
+                "grade": (
+                    None if game_over_capture.stats is None else game_over_capture.stats.grade
+                ),
+                "total_score": (
+                    None
+                    if game_over_capture.stats is None
+                    else game_over_capture.stats.total_score
+                ),
+                "csv_path": (
+                    None
+                    if game_over_capture.archive is None
+                    else str(game_over_capture.archive.csv_path)
+                ),
+                "screenshot_path": (
+                    None
+                    if game_over_capture.archive is None
+                    or game_over_capture.archive.screenshot_path is None
+                    else str(game_over_capture.archive.screenshot_path)
+                ),
+            }
+        ),
+        "adventure_menu": (
+            None
+            if menu_result is None
+            else {
+                "detected": menu_result.detected,
+                "last_poll_time": menu_result.state.last_poll_time,
+                "last_click_time": menu_result.state.last_click_time,
+                "command": _command_summary(menu_result.command),
+            }
+        ),
     }
 
 

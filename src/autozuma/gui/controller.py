@@ -133,7 +133,10 @@ class GuiRuntimeController:
             state=self.state,
             level_id=result.state.level_id,
             command_type=command_type,
-            message="frame+debug" if preview_sink.debug_output_result is not None else "frame",
+            message=_result_message(
+                result,
+                debug_saved=preview_sink.debug_output_result is not None,
+            ),
             commands_enabled=commands_enabled,
             mouse_mode="virtual" if bool(settings.raw_values.get("virtual_mouse", 0.0)) else "physical",
             mode=_mode_from_result(result),
@@ -185,6 +188,34 @@ def _mode_from_result(result: object) -> str | None:
     mode_state = getattr(mode_update, "state", None)
     mode = getattr(mode_state, "mode", None)
     return getattr(mode, "value", None)
+
+
+def _result_message(result: object, *, debug_saved: bool) -> str:
+    ui_result = getattr(result, "ui_result", None)
+    grade_capture = getattr(ui_result, "grade_capture", None)
+    game_over_capture = getattr(ui_result, "game_over_capture", None)
+    menu_result = getattr(ui_result, "menu", None)
+    status = getattr(getattr(grade_capture, "status", None), "value", None)
+    if status == "recorded":
+        stats = getattr(grade_capture, "stats", None)
+        return f"grade recorded: {getattr(stats, 'grade', 'unknown')}"
+    if status == "retryable_failure":
+        return f"grade OCR retry: {getattr(grade_capture, 'error', 'unknown error')}"
+    game_over_status = getattr(getattr(game_over_capture, "status", None), "value", None)
+    if game_over_status == "recorded":
+        stats = getattr(game_over_capture, "stats", None)
+        return (
+            f"game over recorded: {getattr(stats, 'grade', 'unknown')} "
+            f"score={getattr(stats, 'total_score', 'unknown')}"
+        )
+    if game_over_status == "retryable_failure":
+        return (
+            f"game over OCR retry: "
+            f"{getattr(game_over_capture, 'error', 'unknown error')}"
+        )
+    if getattr(menu_result, "detected", False):
+        return "adventure menu: doorway click"
+    return "frame+debug" if debug_saved else "frame"
 
 
 class _GuiPreviewSink:
