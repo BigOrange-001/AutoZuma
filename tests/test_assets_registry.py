@@ -9,6 +9,15 @@ def test_registry_loads_all_levels():
     assert "spiral" in registry.levels
 
 
+def test_level_metadata_matches_its_registry_key():
+    registry = load_asset_registry()
+
+    for key, level in registry.levels.items():
+        assert level.level_id == key
+        assert level.topology.level_id == key
+        assert level.geometry.level_id == key
+
+
 def test_static_levels_have_background_images():
     registry = load_asset_registry()
 

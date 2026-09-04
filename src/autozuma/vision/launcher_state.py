@@ -13,6 +13,9 @@ from autozuma.vision.image_io import to_gray
 
 CURRENT_BALL_DISTANCE = 28
 NEXT_BALL_DISTANCE = 25
+NEXT_BALL_MIN_VALUE = 64.0
+NEXT_BALL_MIN_VALID_FRACTION = 0.20
+NEXT_BALL_MIN_DOMINANT_FRACTION = 0.60
 
 
 def detect_launcher_state(
@@ -38,7 +41,15 @@ def detect_launcher_state(
 
     return LauncherState(
         current_ball=classify_entity_color(frame_roi_bgr, current_x, current_y, radius=13),
-        next_ball=classify_entity_color(frame_roi_bgr, next_x, next_y, radius=8),
+        next_ball=classify_entity_color(
+            frame_roi_bgr,
+            next_x,
+            next_y,
+            radius=8,
+            min_value=NEXT_BALL_MIN_VALUE,
+            min_valid_fraction=NEXT_BALL_MIN_VALID_FRACTION,
+            min_dominant_fraction=NEXT_BALL_MIN_DOMINANT_FRACTION,
+        ),
         next_position=Point(x=float(next_x), y=float(next_y)),
         angle_degrees=float(best_angle),
         confidence=max(0.0, 1.0 - min_error / 255.0),

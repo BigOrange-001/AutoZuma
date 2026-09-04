@@ -59,6 +59,7 @@ class TrackGeometry:
     track_id: int
     points: tuple[Point, ...]
     cumulative_distances: tuple[float, ...]
+    visibility_region_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -131,6 +132,7 @@ class BallEntity:
     track_id: int
     track_idx: int
     color: str
+    visibility_region: int = 0
 
 
 @dataclass(frozen=True)
@@ -140,6 +142,7 @@ class Cluster:
     entities: tuple[BallEntity, ...]
     start_idx: int
     end_idx: int
+    visibility_region: int = 0
     virtual_size_bonus: int = 0
 
     @property
@@ -173,11 +176,14 @@ class TargetCandidate:
     reason: str = ""
     combo_depth: int = 0
     track_id: int | None = None
+    visibility_region: int | None = None
     track_idx: int | None = None
     cluster_start_idx: int | None = None
     cluster_end_idx: int | None = None
     secondary_x: float | None = None
     secondary_y: float | None = None
+    coin_x: float | None = None
+    coin_y: float | None = None
     delay_ms: int = 0
 
 

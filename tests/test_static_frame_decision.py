@@ -315,7 +315,7 @@ def test_decide_static_frame_command_scores_active_breakthrough_coin(monkeypatch
     )
 
     assert command.command_type == CommandType.DOUBLE_SHOOT
-    assert command.primary_target == Point(x=110.0, y=145.0)
+    assert command.primary_target == Point(x=110.0, y=130.0)
     assert command.secondary_target == Point(x=110.0, y=170.0)
     assert command.delay_ms == 250
 

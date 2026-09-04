@@ -92,7 +92,9 @@ Migrated files:
 
 Special case:
 
-- `space.json` has no matching static background image. The original game assets do not provide a static background for this dynamic-background level. It must be handled by a dedicated level-detection and ROI strategy later.
+- `space.json` has no matching static background image. Runtime support uses a dedicated
+  black/purple palette signature for level recognition, the unscaled 640x480 client as
+  its ROI, and a topology-gated bright-ball mask instead of background subtraction.
 
 ## Launcher Template
 

@@ -28,6 +28,7 @@ def check_line_of_sight(
     entities: Iterable[BallEntity],
     min_gap: float,
     target_track_id: int | None = None,
+    target_visibility_region: int | None = None,
     target_track_idx: int | None = None,
     cluster_start_idx: int | None = None,
     cluster_end_idx: int | None = None,
@@ -42,6 +43,7 @@ def check_line_of_sight(
             entity=entity,
             target=target,
             target_track_id=target_track_id,
+            target_visibility_region=target_visibility_region,
             target_track_idx=target_track_idx,
             cluster_start_idx=cluster_start_idx,
             cluster_end_idx=cluster_end_idx,
@@ -156,6 +158,7 @@ def is_entity_reachable(
             projectile_width=projectile_width,
         ),
         target_track_id=target.track_id,
+        target_visibility_region=target.visibility_region,
         target_track_idx=target.track_idx,
         cluster_start_idx=cluster_start_idx,
         cluster_end_idx=cluster_end_idx,
@@ -200,6 +203,7 @@ def _can_block_target(
     entity: BallEntity,
     target: Point,
     target_track_id: int | None,
+    target_visibility_region: int | None,
     target_track_idx: int | None,
     cluster_start_idx: int | None,
     cluster_end_idx: int | None,
@@ -212,6 +216,7 @@ def _can_block_target(
     if _is_local_target_neighbor(
         entity=entity,
         target_track_id=target_track_id,
+        target_visibility_region=target_visibility_region,
         target_track_idx=target_track_idx,
         cluster_start_idx=cluster_start_idx,
         cluster_end_idx=cluster_end_idx,
@@ -225,11 +230,17 @@ def _is_local_target_neighbor(
     *,
     entity: BallEntity,
     target_track_id: int | None,
+    target_visibility_region: int | None,
     target_track_idx: int | None,
     cluster_start_idx: int | None,
     cluster_end_idx: int | None,
 ) -> bool:
     if target_track_id is None or entity.track_id != target_track_id:
+        return False
+    if (
+        target_visibility_region is not None
+        and entity.visibility_region != target_visibility_region
+    ):
         return False
 
     if cluster_start_idx is not None and cluster_end_idx is not None:

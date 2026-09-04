@@ -10,7 +10,7 @@ from autozuma.project_paths import project_path
 
 
 DEFAULT_RUNTIME_VALUES: dict[str, float] = {
-    "n_fire_cooldown": 0.44,
+    "n_fire_cooldown": 0.35,
     "r_fire_cooldown": 0.59,
     "e_fire_cooldown": 0.6,
     "n_m_gap": 23.23,

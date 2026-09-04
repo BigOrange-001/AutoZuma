@@ -12,6 +12,9 @@ from autozuma.core.models import (
     TrackGeometry,
 )
 
+OCCLUDED_CONTROL_POINT_FLAG = 1
+OCCLUDED_VISIBILITY_REGION = -1
+
 
 def centripetal_catmull_rom(
     p0: Point,
@@ -46,6 +49,9 @@ def build_track_geometry(
 
     extended = _extend_endpoints(control_points)
     dense_points: list[Point] = []
+    visibility_region_ids: list[int] = []
+    visible_region = 0
+    previous_segment_was_occluded = False
     for index in range(len(extended) - 3):
         segment = centripetal_catmull_rom(
             extended[index],
@@ -55,12 +61,24 @@ def build_track_geometry(
             samples=samples_per_segment,
         )
         dense_points.extend(segment)
+        segment_is_occluded = _is_occluded_segment(
+            control_points[index],
+            control_points[index + 1],
+        )
+        if previous_segment_was_occluded and not segment_is_occluded:
+            visible_region += 1
+        visibility_region_ids.extend(
+            [OCCLUDED_VISIBILITY_REGION if segment_is_occluded else visible_region]
+            * len(segment)
+        )
+        previous_segment_was_occluded = segment_is_occluded
 
     points = tuple(dense_points)
     return TrackGeometry(
         track_id=track_id,
         points=points,
         cumulative_distances=_cumulative_distances(points),
+        visibility_region_ids=tuple(visibility_region_ids),
     )
 
 
@@ -79,6 +97,17 @@ def build_level_geometry(
 
 def _next_t(t_start: float, p_start: Point, p_end: Point) -> float:
     return t_start + math.sqrt(_distance(p_start, p_end))
+
+
+def _is_occluded_segment(
+    start: TrackControlPoint,
+    end: TrackControlPoint,
+) -> bool:
+    """Return whether a source segment belongs to a tunnel/hidden track section."""
+    return (
+        start.flag == OCCLUDED_CONTROL_POINT_FLAG
+        or end.flag == OCCLUDED_CONTROL_POINT_FLAG
+    )
 
 
 def _distance(a: Point, b: Point) -> float:

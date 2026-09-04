@@ -23,6 +23,15 @@ def test_dense_tracks_are_larger_than_control_tracks():
         for source_track, geometry_track in zip(topology.tracks, geometry.tracks):
             assert len(geometry_track.points) > len(source_track)
             assert len(geometry_track.cumulative_distances) == len(geometry_track.points)
+            assert len(geometry_track.visibility_region_ids) == len(geometry_track.points)
+
+
+def test_occluded_control_point_runs_split_visible_track_regions():
+    topology = load_all_topologies(default_asset_paths())["overunder"]
+    track = build_level_geometry(topology).tracks[0]
+
+    assert -1 in track.visibility_region_ids
+    assert len({region for region in track.visibility_region_ids if region >= 0}) > 1
 
 
 def test_cumulative_distances_are_monotonic():

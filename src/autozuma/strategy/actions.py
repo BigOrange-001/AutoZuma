@@ -27,6 +27,7 @@ class VirtualBall:
     track_idx: int
     color: str
     expires_at: float
+    visibility_region: int = 0
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ def add_virtual_ball(
     color: str,
     current_time: float,
     duration: float,
+    visibility_region: int = 0,
 ) -> ActionTrackerState:
     """Return state with an added temporary virtual ball."""
     state = prune_action_tracker_state(state, current_time)
@@ -96,6 +98,7 @@ def add_virtual_ball(
                 track_idx=track_idx,
                 color=color,
                 expires_at=current_time + duration,
+                visibility_region=visibility_region,
             ),
         ),
     )
@@ -126,6 +129,7 @@ def apply_virtual_balls_to_clusters(
             if (
                 cluster.track_id == virtual.track_id
                 and cluster.color == virtual.color
+                and cluster.visibility_region == virtual.visibility_region
                 and cluster.start_idx - track_idx_padding
                 <= virtual.track_idx
                 <= cluster.end_idx + track_idx_padding

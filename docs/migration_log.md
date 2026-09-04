@@ -1,5 +1,180 @@
 # Migration Log
 
+## 2026-09-03
+
+### Dynamic Space-Level Runtime
+
+Implemented:
+
+- Recognize the active `space` level from a sparse black/purple playfield palette
+  signature instead of a static background template.
+- Require purple, bright-purple, and dark-space pixel ratios so the observed dimmed
+  pause frame and pause-menu overlay are not promoted to gameplay.
+- Accept the normal unscaled 640x480 client capture directly as the space ROI.
+- Detect balls over the animated background from high-value HSV regions restricted to
+  the known topology band; morphology removes isolated stars before the existing
+  projection, color, cluster, reachability, and aiming pipeline resumes.
+
+Performance:
+
+- Space recognition samples about 15,700 pixels only during level detection/redetection
+  and measured about 0.34 ms per call on the development machine.
+- Space ball perception performs one HSV mask plus the same morphology/distance peak
+  style already used by static maps; the supplied active frame measured about 50 ms.
+- No animated background model, per-ball template matching, OCR, or extra capture is
+  introduced.
+
+Manual evidence:
+
+- The supplied active frame was recognized as `space` with confidence `0.996`.
+- The two available real pause/menu debug frames were both rejected.
+- Full world-state processing found 65 visible entities in 39 conservative clusters,
+  recognized launcher colors as blue/purple, and produced a clear rollback-elimination
+  shot through the ordinary strategy path.
+
+Validation:
+
+- Dynamic recognition/ROI/entity/runtime focused suite passed: 38 tests.
+- Full applicable suite passed: 303 tests; the user-managed INI/default-value parity
+  test was intentionally deselected as requested.
+- `.venv\Scripts\python -m ruff check .`, `git diff --check`, and asset validation
+  passed (line-ending warnings and the expected `space` note only).
+
+### Canonical Level IDs
+
+Fixed:
+
+- Normalize topology-derived level IDs to lowercase at the asset-loading boundary.
+- Emit the registry key itself from static level recognition instead of copying
+  potentially inconsistent asset metadata.
+- This fixes the `KeyError('Groovefest')` loop where recognition stored `Groovefest`
+  but the registry was indexed by `groovefest`.
+
+Regression coverage:
+
+- All loaded topology and runtime level metadata must match their registry keys.
+- The exact Groovefest background must produce an ID that directly indexes the
+  registry.
+
+Validation:
+
+- Focused asset/recognition/session suite passed: 42 tests.
+- Exact Groovefest load/recognize/lookup reproduction now reports `lookup_ok=True`.
+- Full suite result: 299 passed and one unrelated configuration-parity test failed
+  because the live-saved `config/strategy_v1_plus.ini` now contains
+  `n_fire_cooldown=0.45` while the code fallback remains `0.35`.
+- Rerunning the suite with only that configuration-parity test deselected passed all
+  299 selected tests.
+- `.venv\Scripts\python -m ruff check .`, `git diff --check`, and asset validation
+  passed (line-ending warnings and the expected `space` note only).
+
+### Pair Semantics And Next-Ball Stability
+
+Changed:
+
+- Reserved `PAIR` target classification for real single-ball clusters. Multi-ball
+  eliminations that are strategically downgraded retain `ELIM` semantics while using
+  the existing pair-priority score.
+- Tightened only the small next-ball launcher sample with minimum brightness, valid
+  pixel share, and dominant-color share gates. Track-ball classification thresholds
+  remain unchanged for partially occluded observations.
+- Added a constant-size runtime tracker that requires three matching next-ball frames
+  before the color participates in swap scoring.
+- Conflicting/unknown observations invalidate confirmation immediately, and every
+  emitted shot resets it because the launcher queue changes.
+
+Behavior:
+
+- Every target labeled `PAIR` now uses the single-ball `+16 px` forward aim rule.
+- A dark or mixed launcher sample is treated as unknown rather than guessed.
+- The first two next-ball observations cannot trigger a swap, while ordinary
+  current-ball targeting remains available.
+- At the normal 10 FPS and `0.35 s` fire cooldown, the next color can normally be
+  reconfirmed before another shot becomes eligible.
+
+Performance:
+
+- No additional frame capture, template match, or color-classification pass is added.
+- Per frame, the new work is a few color-vote checks already available from the sample
+  and one constant-size consecutive-observation state update.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 297 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `git diff --check` passed (line-ending conversion warnings only).
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
+### Unified Ball Aim And Coin Collision-Strip Aim
+
+Changed:
+
+- Added one shared forward-biased aim implementation for every primary target that is
+  a ball.
+- Normal scoring, elimination/combo targets, breakthrough-coin blockers, and cluster
+  fallback discards now use the same reachable-sequence aim rule.
+- Removed the breakthrough-specific `+15` dense-index exception.
+- Coin scoring now searches valid rays across the `32 px` projectile collision strip
+  instead of requiring the ray centerline to pass through the coin center.
+- Coin targets retain the real coin coordinate separately from an off-center command
+  coordinate so temporary locks remain centered on the detected coin.
+
+Behavior:
+
+- Single balls use a `16 px` forward arc-distance aim offset.
+- Even reachable ball sequences use the endpoint-side middle ball; odd sequences use
+  the middle ball plus the same `16 px` forward offset.
+- Ball fallback targets are rejected when their final shifted aim ray is not reachable.
+- Coin aiming prefers the center ray and uses the smallest clear off-center offset when
+  necessary.
+
+Performance:
+
+- No additional image processing is performed.
+- Coin-ray search is only active for already-promoted coins and checks at most one
+  center ray plus 16 integer offsets on each side.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 291 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `git diff --check` passed (line-ending conversion warnings only).
+- `.venv\Scripts\python -m autozuma.cli.validate_assets` passed with the expected
+  `space` special-detection note.
+
+## 2026-09-02
+
+### Occluded And Crossing Track Safety
+
+Changed:
+
+- Dense topology now retains visible-region ids derived from control-point flag `1`.
+- Ball projection excludes occluded track samples and resolves duplicate multi-track
+  projections using local sequence support.
+- Clustering, combo/rollback scoring, reachability, discard, coin targeting, action
+  locks, and virtual in-flight balls respect visible-region boundaries.
+- Unknown-color observations and large missing track gaps are sequence barriers rather
+  than transparent gaps.
+- Added `docs/development_overview.md` as the current-code development baseline.
+- Aligned the fallback `n_fire_cooldown` value with the bundled strategy INI (`0.35`).
+
+Behavior:
+
+- A fully hidden ball is not assigned an invented color or used to bridge a combo.
+- Targets are generated only from visible observations, and forward aim offsets stop at
+  the current visible-region boundary.
+- A ball detected at a multi-track crossing is assigned to one supported track instead
+  of being counted once per overlapping track.
+- The added runtime work is limited to topology metadata lookup and small detected-
+  entity comparisons; no extra frame-recognition pass was added.
+
+Validation:
+
+- `.venv\Scripts\python -m pytest` passed: 286 tests.
+- `.venv\Scripts\python -m ruff check .` passed.
+- `git diff --check` passed (line-ending conversion warnings only).
+
 ## 2026-05-16
 
 ### GUI Command Execution Toggle

@@ -49,6 +49,17 @@ def test_launcher_state_returns_unknown_without_valid_templates():
     assert state.confidence is None
 
 
+def test_launcher_state_rejects_dark_background_as_a_next_ball():
+    frame = np.zeros((120, 120, 3), dtype=np.uint8)
+    pivot = Point(x=60, y=60)
+    cv2.circle(frame, (60, 88), 13, COLOR_PROFILES_BGR["red"][0], -1)
+
+    state = detect_launcher_state(frame, pivot, _controlled_template_set(search_radius=20))
+
+    assert state.current_ball == "red"
+    assert state.next_ball == UNKNOWN_COLOR
+
+
 def _controlled_template_set(search_radius: int) -> LauncherTemplateSet:
     shape = (search_radius * 2, search_radius * 2)
     match_mask = np.zeros(shape, dtype=np.uint8)

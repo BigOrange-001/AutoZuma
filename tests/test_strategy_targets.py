@@ -78,6 +78,8 @@ def test_score_basic_targets_scores_single_ball_as_pair_target():
 
     assert len(targets) == 1
     assert targets[0].target_type == PAIR_TARGET
+    assert targets[0].x == 46.0
+    assert targets[0].track_idx == 46
 
 
 def test_score_basic_targets_sorts_candidates_by_score_descending():
@@ -136,7 +138,7 @@ def test_score_basic_targets_scores_rollback_elimination():
     assert targets[0].combo_depth == 0
 
 
-def test_score_basic_targets_downgrades_when_nearby_combo_is_deeper():
+def test_score_basic_targets_downgrades_priority_without_mislabeling_pair():
     target_cluster = _cluster("red", 2, 10)
     combo_left = _cluster("yellow", 2, 35)
     combo_center = _cluster("blue", 2, 60)
@@ -149,11 +151,11 @@ def test_score_basic_targets_downgrades_when_nearby_combo_is_deeper():
     targets = score_basic_targets(world_state, _level(), _params())
 
     assert len(targets) == 1
-    assert targets[0].target_type == PAIR_TARGET
+    assert targets[0].target_type == ELIM_TARGET
     assert targets[0].score < 100.0
 
 
-def test_score_basic_targets_skips_unknown_clusters_when_scanning_neighbors():
+def test_score_basic_targets_treats_unknown_cluster_as_combo_barrier():
     left_cluster = _cluster("blue", 2, 20)
     unknown_cluster = _cluster("unknown", 1, 40)
     target_cluster = _cluster("red", 2, 60)
@@ -166,7 +168,37 @@ def test_score_basic_targets_skips_unknown_clusters_when_scanning_neighbors():
     targets = score_basic_targets(world_state, _level(), _params())
 
     assert len(targets) == 1
-    assert targets[0].target_type == COMBO_TARGET
+    assert targets[0].target_type == ELIM_TARGET
+
+
+def test_score_basic_targets_does_not_build_combo_across_missing_sequence_gap():
+    left_cluster = _cluster("blue", 2, 10)
+    target_cluster = _cluster("red", 2, 40)
+    right_cluster = _cluster("blue", 1, 180)
+    world_state = _world_state(
+        current_ball="red",
+        clusters=(left_cluster, target_cluster, right_cluster),
+    )
+
+    targets = score_basic_targets(world_state, _horizontal_level(), _params())
+
+    assert len(targets) == 1
+    assert targets[0].target_type == ELIM_TARGET
+
+
+def test_score_basic_targets_does_not_build_combo_across_occluded_region():
+    left_cluster = _cluster("blue", 2, 20, visibility_region=0)
+    target_cluster = _cluster("red", 2, 50, visibility_region=0)
+    right_cluster = _cluster("blue", 1, 80, visibility_region=1)
+    world_state = _world_state(
+        current_ball="red",
+        clusters=(left_cluster, target_cluster, right_cluster),
+    )
+
+    targets = score_basic_targets(world_state, _level(), _params())
+
+    assert len(targets) == 1
+    assert targets[0].target_type == ELIM_TARGET
 
 
 def test_score_basic_targets_skips_cluster_inside_active_deadzone():
@@ -348,7 +380,12 @@ def _world_state(current_ball: str, clusters: tuple[Cluster, ...]) -> WorldState
     )
 
 
-def _cluster(color: str, size: int, start_idx: int) -> Cluster:
+def _cluster(
+    color: str,
+    size: int,
+    start_idx: int,
+    visibility_region: int = 0,
+) -> Cluster:
     entities = tuple(
         BallEntity(
             x=float(start_idx + offset * 2),
@@ -356,6 +393,7 @@ def _cluster(color: str, size: int, start_idx: int) -> Cluster:
             track_id=0,
             track_idx=start_idx + offset * 2,
             color=color,
+            visibility_region=visibility_region,
         )
         for offset in range(size)
     )
@@ -365,6 +403,7 @@ def _cluster(color: str, size: int, start_idx: int) -> Cluster:
         entities=entities,
         start_idx=entities[0].track_idx,
         end_idx=entities[-1].track_idx,
+        visibility_region=visibility_region,
     )
 
 

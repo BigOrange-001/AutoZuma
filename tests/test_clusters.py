@@ -61,11 +61,31 @@ def test_build_topological_clusters_uses_strict_track_index_gap_threshold():
     ]
 
 
-def _entity(track_id: int, track_idx: int, color: str) -> BallEntity:
+def test_build_topological_clusters_splits_across_visibility_regions():
+    clusters = build_topological_clusters(
+        (
+            _entity(track_id=0, track_idx=40, color="red", visibility_region=0),
+            _entity(track_id=0, track_idx=60, color="red", visibility_region=1),
+        )
+    )
+
+    assert [(cluster.visibility_region, cluster.size) for cluster in clusters] == [
+        (0, 1),
+        (1, 1),
+    ]
+
+
+def _entity(
+    track_id: int,
+    track_idx: int,
+    color: str,
+    visibility_region: int = 0,
+) -> BallEntity:
     return BallEntity(
         x=float(track_idx),
         y=10.0,
         track_id=track_id,
         track_idx=track_idx,
         color=color,
+        visibility_region=visibility_region,
     )

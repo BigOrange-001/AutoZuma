@@ -7,11 +7,23 @@ import numpy as np
 
 from autozuma.core.models import GameRoiResult, LevelRuntimeAssets, Point, RoiExtractionError
 from autozuma.vision.image_io import to_gray
+from autozuma.vision.space_level import SPACE_FRAME_HEIGHT, SPACE_FRAME_WIDTH, SPACE_LEVEL_ID
 
 
 def extract_game_roi(frame_bgr: np.ndarray, level: LevelRuntimeAssets) -> GameRoiResult:
-    """Locate and crop the static level background within a raw BGR frame."""
+    """Locate and crop a supported level ROI within a raw BGR frame."""
     if level.background is None:
+        if level.requires_special_detection and level.level_id == SPACE_LEVEL_ID:
+            if frame_bgr.shape[:2] != (SPACE_FRAME_HEIGHT, SPACE_FRAME_WIDTH):
+                raise RoiExtractionError(
+                    "Dynamic space level requires an unscaled "
+                    f"{SPACE_FRAME_WIDTH}x{SPACE_FRAME_HEIGHT} client frame."
+                )
+            return GameRoiResult(
+                frame=frame_bgr.copy(),
+                offset=Point(x=0.0, y=0.0),
+                confidence=1.0,
+            )
         raise RoiExtractionError(f"Level {level.level_id!r} has no static background.")
 
     background = level.background

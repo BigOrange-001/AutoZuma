@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 import cv2
 import numpy as np
 
-from autozuma.core.models import LevelRuntimeAssets, LauncherTemplateSet
+from autozuma.core.models import CommandType, LevelRuntimeAssets, LauncherTemplateSet
 from autozuma.decision.static_frame import (
     StatefulStaticFrameDecisionResult,
     decide_stateful_static_frame_from_world,
@@ -28,6 +28,12 @@ from autozuma.vision.coins import (
     update_active_coins_from_frame,
     update_coin_tracker_state,
 )
+from autozuma.vision.launcher_stability import (
+    LauncherColorStabilityParams,
+    LauncherColorStabilityState,
+    reset_launcher_color_stability,
+    stabilize_launcher_colors,
+)
 from autozuma.vision.roi import extract_game_roi
 from autozuma.vision.world_state import detect_static_world_state_from_roi
 
@@ -38,6 +44,7 @@ class StaticRuntimeState:
 
     mode_state: RuntimeModeState
     command_outcome: CommandOutcomeState
+    launcher_colors: LauncherColorStabilityState = LauncherColorStabilityState()
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,7 @@ class StaticRuntimeFrameParams:
     raw_values: Mapping[str, float]
     coin_detection: CoinDetectionParams = CoinDetectionParams()
     coin_tracking: CoinTrackingParams = CoinTrackingParams()
+    launcher_colors: LauncherColorStabilityParams = LauncherColorStabilityParams()
 
 
 @dataclass(frozen=True)
@@ -65,6 +73,7 @@ def initial_static_runtime_state(current_time: float) -> StaticRuntimeState:
     return StaticRuntimeState(
         mode_state=initial_runtime_mode_state(current_time),
         command_outcome=CommandOutcomeState(),
+        launcher_colors=LauncherColorStabilityState(),
     )
 
 
@@ -104,6 +113,12 @@ def run_static_runtime_frame(
         p_start_exclude=coin_config.frame_decision.p_start_exclude,
         p_end_exclude=coin_config.frame_decision.p_end_exclude,
     )
+    launcher_update = stabilize_launcher_colors(
+        launcher=world_state.launcher,
+        state=state.launcher_colors,
+        params=params.launcher_colors,
+    )
+    world_state = replace(world_state, launcher=launcher_update.launcher)
     mode_update = update_runtime_mode_state(
         previous=state.mode_state,
         world_state=world_state,
@@ -124,11 +139,15 @@ def run_static_runtime_frame(
         current_time=current_time,
         params=strategy_config.stateful_decision,
     )
+    launcher_colors = launcher_update.state
+    if _command_fires(decision.decision.screen_command.command_type):
+        launcher_colors = reset_launcher_color_stability()
 
     return StaticRuntimeFrameResult(
         state=StaticRuntimeState(
             mode_state=mode_update.state,
             command_outcome=decision.state,
+            launcher_colors=launcher_colors,
         ),
         decision=decision,
         coin_update=coin_update,
@@ -163,3 +182,12 @@ def _update_active_coins(
         detection_params=params.coin_detection,
         tracking_params=params.coin_tracking,
     )
+
+
+def _command_fires(command_type: CommandType) -> bool:
+    return command_type in {
+        CommandType.SHOOT,
+        CommandType.DOUBLE_SHOOT,
+        CommandType.SWAP_SHOOT,
+        CommandType.SWAP_DOUBLE_SHOOT,
+    }

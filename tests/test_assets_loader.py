@@ -10,6 +10,14 @@ def test_loads_all_migrated_topologies():
     assert "spiral" in topologies
 
 
+def test_topology_level_ids_match_their_canonical_registry_keys():
+    topologies = load_all_topologies(default_asset_paths())
+
+    for key, topology in topologies.items():
+        assert topology.level_id == key
+        assert key == key.lower()
+
+
 def test_space_is_marked_for_special_detection():
     topology = load_all_topologies(default_asset_paths())["space"]
 

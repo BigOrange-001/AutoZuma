@@ -206,13 +206,42 @@ def test_apply_virtual_balls_to_clusters_returns_original_clusters_without_match
     assert clusters == (cluster,)
 
 
-def _cluster(color: str, track_id: int, start_idx: int) -> Cluster:
+def test_apply_virtual_balls_to_clusters_does_not_cross_visibility_region():
+    cluster = _cluster("red", track_id=1, start_idx=100, visibility_region=1)
+    state = ActionTrackerState(
+        virtual_balls=(
+            VirtualBall(
+                track_id=1,
+                track_idx=100,
+                color="red",
+                expires_at=12.0,
+                visibility_region=0,
+            ),
+        )
+    )
+
+    clusters = apply_virtual_balls_to_clusters(
+        clusters=(cluster,),
+        state=state,
+        current_time=10.0,
+    )
+
+    assert clusters == (cluster,)
+
+
+def _cluster(
+    color: str,
+    track_id: int,
+    start_idx: int,
+    visibility_region: int = 0,
+) -> Cluster:
     entity = BallEntity(
         x=float(start_idx),
         y=50.0,
         track_id=track_id,
         track_idx=start_idx,
         color=color,
+        visibility_region=visibility_region,
     )
     return Cluster(
         track_id=track_id,
@@ -220,4 +249,5 @@ def _cluster(color: str, track_id: int, start_idx: int) -> Cluster:
         entities=(entity,),
         start_idx=start_idx,
         end_idx=start_idx,
+        visibility_region=visibility_region,
     )
