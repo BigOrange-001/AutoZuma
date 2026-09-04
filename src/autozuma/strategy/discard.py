@@ -5,8 +5,16 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from autozuma.core.models import Cluster, LevelRuntimeAssets, Point, TargetCandidate, WorldState
-from autozuma.strategy.line_of_sight import check_line_of_sight
+from autozuma.core.models import (
+    Cluster,
+    LevelRuntimeAssets,
+    Point,
+    TargetCandidate,
+    TrackGeometry,
+    WorldState,
+)
+from autozuma.strategy.aiming import aim_at_ball_entities
+from autozuma.strategy.line_of_sight import check_line_of_sight, reachable_entities
 from autozuma.vision.colors import UNKNOWN_COLOR
 
 DISCARD_TARGET = "DISCARD"
@@ -45,7 +53,7 @@ def discard_target(
     if gap_target is not None:
         return gap_target
 
-    cluster_target = _single_or_earliest_cluster_target(world_state, level)
+    cluster_target = _single_or_earliest_cluster_target(world_state, level, params)
     if cluster_target is not None:
         return cluster_target
 
@@ -117,7 +125,11 @@ def _reachable_gap_target(
         right = clusters[idx + 1]
         if left.color == UNKNOWN_COLOR or right.color == UNKNOWN_COLOR:
             continue
-        if left.track_id != right.track_id or left.color == right.color:
+        if (
+            left.track_id != right.track_id
+            or left.visibility_region != right.visibility_region
+            or left.color == right.color
+        ):
             continue
         left_entity = left.entities[-1]
         right_entity = right.entities[0]
@@ -148,6 +160,7 @@ def _reachable_gap_target(
                 target_type=DISCARD_TARGET,
                 reason="fallback reachable gap",
                 track_id=left.track_id,
+                visibility_region=left.visibility_region,
                 track_idx=gap_idx,
             )
         )
@@ -193,27 +206,67 @@ def _gap_nearest_same_color_cluster(
 def _single_or_earliest_cluster_target(
     world_state: WorldState,
     level: LevelRuntimeAssets,
+    params: DiscardParams,
 ) -> TargetCandidate | None:
-    known_clusters = [cluster for cluster in world_state.clusters if cluster.color != UNKNOWN_COLOR]
+    known_clusters = [
+        cluster
+        for cluster in world_state.clusters
+        if cluster.color != UNKNOWN_COLOR
+        and cluster.visibility_region >= 0
+        and cluster.entities
+    ]
     single_clusters = [cluster for cluster in known_clusters if cluster.size == 1]
-    candidate_clusters = single_clusters or known_clusters
-    if not candidate_clusters:
-        return None
+    candidate_clusters = sorted(single_clusters or known_clusters, key=lambda item: item.start_idx)
+    for cluster in candidate_clusters:
+        track = _find_track(level, cluster.track_id)
+        if track is None:
+            continue
+        reachable = reachable_entities(
+            frog_pivot=level.topology.frog_pivot,
+            targets=cluster.entities,
+            entities=world_state.entities,
+            cluster_start_idx=cluster.start_idx,
+            cluster_end_idx=cluster.end_idx,
+        )
+        ball_aim = aim_at_ball_entities(reachable, track)
+        if ball_aim is None:
+            continue
+        line_of_sight = check_line_of_sight(
+            frog_pivot=level.topology.frog_pivot,
+            target=ball_aim.point,
+            entities=world_state.entities,
+            min_gap=params.min_gap,
+            target_track_id=cluster.track_id,
+            target_visibility_region=cluster.visibility_region,
+            target_track_idx=ball_aim.track_idx,
+            cluster_start_idx=cluster.start_idx,
+            cluster_end_idx=cluster.end_idx,
+        )
+        if not line_of_sight.is_clear:
+            continue
+        return TargetCandidate(
+            x=ball_aim.point.x,
+            y=ball_aim.point.y,
+            score=0.0,
+            target_type=DISCARD_TARGET,
+            reason=(
+                "fallback size-1 cluster"
+                if cluster.size == 1
+                else "fallback earliest cluster"
+            ),
+            track_id=cluster.track_id,
+            visibility_region=cluster.visibility_region,
+            track_idx=ball_aim.track_idx,
+            cluster_start_idx=cluster.start_idx,
+            cluster_end_idx=cluster.end_idx,
+        )
+    return None
 
-    cluster = min(candidate_clusters, key=lambda item: item.start_idx)
-    point = _track_point(level, cluster.track_id, cluster.start_idx)
-    if point is None:
-        return None
-    return TargetCandidate(
-        x=point.x,
-        y=point.y,
-        score=0.0,
-        target_type=DISCARD_TARGET,
-        reason="fallback size-1 cluster" if cluster.size == 1 else "fallback earliest cluster",
-        track_id=cluster.track_id,
-        track_idx=cluster.start_idx,
-        cluster_start_idx=cluster.start_idx,
-        cluster_end_idx=cluster.end_idx,
+
+def _find_track(level: LevelRuntimeAssets, track_id: int) -> TrackGeometry | None:
+    return next(
+        (track for track in level.geometry.tracks if track.track_id == track_id and track.points),
+        None,
     )
 
 

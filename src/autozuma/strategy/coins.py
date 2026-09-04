@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from autozuma.core.models import Cluster, LevelRuntimeAssets, Point, TargetCandidate, WorldState
-from autozuma.strategy.line_of_sight import check_line_of_sight
+from autozuma.core.models import (
+    BallEntity,
+    Cluster,
+    LevelRuntimeAssets,
+    Point,
+    TargetCandidate,
+    WorldState,
+)
+from autozuma.strategy.aiming import aim_at_ball_entities
+from autozuma.strategy.line_of_sight import check_line_of_sight, reachable_entities
 from autozuma.vision.colors import UNKNOWN_COLOR
 
 DIRECT_COIN_TARGET = "direct_coin"
@@ -19,7 +28,7 @@ class CoinScoringParams:
 
     coin_priority: float = 100000.0
     min_gap: float = 36.0
-    breakthrough_aim_offset_idx: int = 15
+    projectile_width: float = 32.0
     breakthrough_delay_ms: int = 250
 
 
@@ -52,20 +61,39 @@ def score_coin_targets_for_color(
 
     targets: list[TargetCandidate] = []
     for coin in active_coins:
-        blockers = _coin_blockers(
-            world_state=world_state,
+        direct_aim = _clear_coin_aim(
             frog_pivot=level.topology.frog_pivot,
             coin=coin,
+            entities=world_state.entities,
             params=params,
         )
-        if not blockers:
-            targets.append(_direct_coin_target(coin, params))
+        if direct_aim is not None:
+            targets.append(_direct_coin_target(direct_aim, coin, params))
             continue
-        if len(blockers) == 1:
-            target = _breakthrough_coin_target(
-                blocker=blockers[0],
+
+        for blocker in world_state.clusters:
+            if blocker.color != target_color or blocker.size < 2:
+                continue
+            blocker_entities = frozenset(blocker.entities)
+            remaining_entities = tuple(
+                entity
+                for entity in world_state.entities
+                if entity not in blocker_entities
+            )
+            coin_aim = _clear_coin_aim(
+                frog_pivot=level.topology.frog_pivot,
                 coin=coin,
+                entities=remaining_entities,
+                params=params,
+            )
+            if coin_aim is None:
+                continue
+            target = _breakthrough_coin_target(
+                blocker=blocker,
+                coin=coin,
+                coin_aim=coin_aim,
                 target_color=target_color,
+                world_state=world_state,
                 level=level,
                 params=params,
             )
@@ -76,48 +104,108 @@ def score_coin_targets_for_color(
     return tuple(targets)
 
 
-def _coin_blockers(
-    world_state: WorldState,
+def _clear_coin_aim(
     frog_pivot: Point,
     coin: Point,
+    entities: Iterable[BallEntity],
     params: CoinScoringParams,
-) -> tuple[Cluster, ...]:
-    blockers: list[Cluster] = []
-    for cluster in world_state.clusters:
-        if cluster.color == UNKNOWN_COLOR:
-            continue
+) -> Point | None:
+    blockers = tuple(entities)
+    for aim_point in _coin_aim_points(
+        frog_pivot,
+        coin,
+        collision_width=params.projectile_width,
+    ):
         line_of_sight = check_line_of_sight(
             frog_pivot=frog_pivot,
-            target=coin,
-            entities=cluster.entities,
+            target=aim_point,
+            entities=blockers,
             min_gap=params.min_gap,
+            projectile_width=params.projectile_width,
         )
-        if not line_of_sight.is_clear:
-            blockers.append(cluster)
-    return tuple(blockers)
+        if line_of_sight.is_clear:
+            return aim_point
+    return None
 
 
-def _direct_coin_target(coin: Point, params: CoinScoringParams) -> TargetCandidate:
+def _coin_aim_points(
+    frog_pivot: Point,
+    coin: Point,
+    collision_width: float,
+) -> tuple[Point, ...]:
+    """Return center-first rays whose collision strip still covers the coin."""
+    dx = coin.x - frog_pivot.x
+    dy = coin.y - frog_pivot.y
+    distance = math.hypot(dx, dy)
+    half_width = max(0.0, collision_width) / 2.0
+    if distance <= 1e-6 or half_width <= 0.0:
+        return (coin,)
+
+    perpendicular_x = -dy / distance
+    perpendicular_y = dx / distance
+    offsets: list[float] = [0.0]
+    whole_pixels = int(math.floor(half_width))
+    for offset in range(1, whole_pixels + 1):
+        offsets.extend((float(offset), float(-offset)))
+    if half_width > whole_pixels:
+        offsets.extend((half_width, -half_width))
+
+    points: list[Point] = []
+    seen: set[tuple[int, int]] = set()
+    for offset in offsets:
+        point = Point(
+            x=float(int(coin.x + perpendicular_x * offset)),
+            y=float(int(coin.y + perpendicular_y * offset)),
+        )
+        key = (int(point.x), int(point.y))
+        if key in seen:
+            continue
+        if _distance_from_ray(frog_pivot, point, coin) > half_width + 1e-6:
+            continue
+        seen.add(key)
+        points.append(point)
+    return tuple(points)
+
+
+def _distance_from_ray(origin: Point, aim: Point, point: Point) -> float:
+    ray_dx = aim.x - origin.x
+    ray_dy = aim.y - origin.y
+    ray_length = math.hypot(ray_dx, ray_dy)
+    if ray_length <= 1e-6:
+        return math.hypot(point.x - origin.x, point.y - origin.y)
+    return abs(
+        (point.x - origin.x) * ray_dy - (point.y - origin.y) * ray_dx
+    ) / ray_length
+
+
+def _direct_coin_target(
+    aim_point: Point,
+    coin: Point,
+    params: CoinScoringParams,
+) -> TargetCandidate:
     return TargetCandidate(
-        x=coin.x,
-        y=coin.y,
+        x=aim_point.x,
+        y=aim_point.y,
         score=params.coin_priority * 2.0,
         target_type=DIRECT_COIN_TARGET,
-        reason="direct coin line of sight is clear",
+        reason="coin collision strip has clear line of sight",
+        coin_x=coin.x,
+        coin_y=coin.y,
     )
 
 
 def _breakthrough_coin_target(
     blocker: Cluster,
     coin: Point,
+    coin_aim: Point,
     target_color: str,
+    world_state: WorldState,
     level: LevelRuntimeAssets,
     params: CoinScoringParams,
 ) -> TargetCandidate | None:
     if blocker.color != target_color or blocker.size < 2:
         return None
 
-    center_entity = blocker.entities[len(blocker.entities) // 2]
     track = next(
         (track for track in level.geometry.tracks if track.track_id == blocker.track_id),
         None,
@@ -125,11 +213,20 @@ def _breakthrough_coin_target(
     if track is None or not track.points:
         return None
 
-    aim_idx = min(center_entity.track_idx + params.breakthrough_aim_offset_idx, len(track.points) - 1)
-    aim_point = track.points[aim_idx]
+    reachable = reachable_entities(
+        frog_pivot=level.topology.frog_pivot,
+        targets=blocker.entities,
+        entities=world_state.entities,
+        projectile_width=params.projectile_width,
+        cluster_start_idx=blocker.start_idx,
+        cluster_end_idx=blocker.end_idx,
+    )
+    ball_aim = aim_at_ball_entities(reachable, track)
+    if ball_aim is None:
+        return None
     return TargetCandidate(
-        x=aim_point.x,
-        y=aim_point.y,
+        x=ball_aim.point.x,
+        y=ball_aim.point.y,
         score=params.coin_priority * 1.5,
         target_type=BREAKTHROUGH_COIN_TARGET,
         reason=(
@@ -137,10 +234,13 @@ def _breakthrough_coin_target(
             f"color={blocker.color} size={blocker.size}"
         ),
         track_id=blocker.track_id,
-        track_idx=aim_idx,
+        visibility_region=blocker.visibility_region,
+        track_idx=ball_aim.track_idx,
         cluster_start_idx=blocker.start_idx,
         cluster_end_idx=blocker.end_idx,
-        secondary_x=coin.x,
-        secondary_y=coin.y,
+        secondary_x=coin_aim.x,
+        secondary_y=coin_aim.y,
+        coin_x=coin.x,
+        coin_y=coin.y,
         delay_ms=params.breakthrough_delay_ms,
     )

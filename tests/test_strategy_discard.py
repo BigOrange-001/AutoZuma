@@ -108,13 +108,18 @@ def test_discard_target_falls_back_to_size_one_cluster_when_edges_and_gaps_block
 
     monkeypatch.setattr(
         "autozuma.strategy.discard.check_line_of_sight",
-        lambda **kwargs: type("Result", (), {"is_clear": False})(),
+        lambda **kwargs: type(
+            "Result",
+            (),
+            {"is_clear": kwargs["target"].x == 76.0},
+        )(),
     )
 
     target = discard_target(state, _level(), (100, 100))
 
     assert target is not None
-    assert target.track_idx == 60
+    assert target.track_idx == 76
+    assert target.x == 76
     assert "size-1" in target.reason
 
 
@@ -129,13 +134,18 @@ def test_discard_target_falls_back_to_earliest_known_cluster(monkeypatch):
 
     monkeypatch.setattr(
         "autozuma.strategy.discard.check_line_of_sight",
-        lambda **kwargs: type("Result", (), {"is_clear": False})(),
+        lambda **kwargs: type(
+            "Result",
+            (),
+            {"is_clear": kwargs["target"].x == 32.0},
+        )(),
     )
 
     target = discard_target(state, _level(), (100, 100))
 
     assert target is not None
-    assert target.track_idx == 30
+    assert target.track_idx == 32
+    assert target.x == 32
     assert "earliest" in target.reason
 
 
@@ -157,6 +167,20 @@ def test_discard_target_falls_back_upward_without_clusters(monkeypatch):
     assert target is not None
     assert target.x == 50
     assert target.y == -30
+    assert "upward" in target.reason
+
+
+def test_discard_target_does_not_use_unreachable_ball_fallback(monkeypatch):
+    state = _world_state(current_ball="red", clusters=(_cluster("blue", 1, 60),))
+    monkeypatch.setattr(
+        "autozuma.strategy.discard.check_line_of_sight",
+        lambda **kwargs: type("Result", (), {"is_clear": False})(),
+    )
+
+    target = discard_target(state, _level(), (100, 100))
+
+    assert target is not None
+    assert target.track_idx is None
     assert "upward" in target.reason
 
 

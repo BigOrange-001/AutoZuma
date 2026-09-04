@@ -27,6 +27,8 @@ from autozuma.runtime.static_runtime import (
 )
 from autozuma.strategy.action_updates import CommandOutcomeState
 from autozuma.vision.coins import CoinTrack, CoinTrackerState
+from autozuma.vision.colors import UNKNOWN_COLOR
+from autozuma.vision.launcher_stability import LauncherColorStabilityState
 
 
 def test_initial_static_runtime_state_resets_mode_and_command_state():
@@ -34,6 +36,7 @@ def test_initial_static_runtime_state_resets_mode_and_command_state():
 
     assert state.mode_state == RuntimeModeState(last_spawn_time=10.0)
     assert state.command_outcome == CommandOutcomeState()
+    assert state.launcher_colors == LauncherColorStabilityState()
 
 
 def test_run_static_runtime_frame_threads_coin_mode_and_decision_state(monkeypatch):
@@ -102,9 +105,12 @@ def test_run_static_runtime_frame_threads_coin_mode_and_decision_state(monkeypat
     assert result.strategy_config.frame_decision.active_coins == (Point(x=20.0, y=20.0),)
     assert result.strategy_config.frame_decision.target_selection.min_gap == 0.0
     assert result.decision.decision.roi_result == roi_result
-    assert result.decision.decision.world_state == world_state
+    assert result.decision.decision.world_state.launcher.next_ball == UNKNOWN_COLOR
+    assert result.decision.decision.world_state.entities == world_state.entities
+    assert result.decision.decision.world_state.clusters == world_state.clusters
     assert result.decision.decision.screen_command.command_type == CommandType.SHOOT
     assert result.state.command_outcome.last_fire_time == 10.0
+    assert result.state.launcher_colors == LauncherColorStabilityState()
     assert result.state.command_outcome.coin_tracker.tracks[0] == CoinTrack(
         first_seen=9.0,
         last_seen=10.0,
@@ -146,6 +152,49 @@ def test_run_static_runtime_frame_prunes_coin_state_without_static_background(mo
 
     assert result.coin_update.active_coins == ()
     assert result.coin_update.state.tracks == {}
+
+
+def test_run_static_runtime_frame_confirms_next_ball_across_frames(monkeypatch):
+    raw_frame = np.zeros((60, 60, 3), dtype=np.uint8)
+    roi_frame = np.zeros((40, 40, 3), dtype=np.uint8)
+    level = _level(background_gray=None)
+    roi_result = GameRoiResult(frame=roi_frame, offset=Point(x=0.0, y=0.0), confidence=1.0)
+    world_state = WorldState(
+        level_id="test",
+        launcher=LauncherState(current_ball=UNKNOWN_COLOR, next_ball="blue", next_position=None),
+        entities=(),
+        clusters=(),
+    )
+
+    monkeypatch.setattr(
+        "autozuma.runtime.static_runtime.extract_game_roi",
+        lambda frame_bgr, level: roi_result,
+    )
+    monkeypatch.setattr(
+        "autozuma.runtime.static_runtime.detect_static_world_state_from_roi",
+        lambda **kwargs: world_state,
+    )
+
+    state = initial_static_runtime_state(current_time=10.0)
+    observed = []
+    for current_time in (10.1, 10.2, 10.3):
+        result = run_static_runtime_frame(
+            frame_bgr=raw_frame,
+            level=level,
+            launcher_templates=LauncherTemplateSet(
+                search_radius=5,
+                step_degrees=5,
+                templates={},
+            ),
+            state=state,
+            current_time=current_time,
+            params=StaticRuntimeFrameParams(raw_values=_params()),
+        )
+        observed.append(result.decision.decision.world_state.launcher.next_ball)
+        state = result.state
+
+    assert observed == [UNKNOWN_COLOR, UNKNOWN_COLOR, "blue"]
+    assert state.launcher_colors.confirmed_next_ball == "blue"
 
 
 def _level(background_gray: np.ndarray | None) -> LevelRuntimeAssets:

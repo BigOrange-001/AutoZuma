@@ -48,9 +48,22 @@ def test_extract_game_roi_rejects_frame_smaller_than_background():
         extract_game_roi(background[:-1, :, :], level)
 
 
-def test_extract_game_roi_requires_static_background():
+def test_extract_game_roi_supports_unscaled_dynamic_space_frame():
+    registry = load_asset_registry()
+    space = registry.levels["space"]
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    result = extract_game_roi(frame, space)
+
+    assert result.offset.x == 0
+    assert result.offset.y == 0
+    assert result.confidence == 1.0
+    assert np.array_equal(result.frame, frame)
+
+
+def test_extract_game_roi_rejects_scaled_dynamic_space_frame():
     registry = load_asset_registry()
     space = registry.levels["space"]
 
-    with pytest.raises(RoiExtractionError, match="no static background"):
-        extract_game_roi(np.zeros((480, 640, 3), dtype=np.uint8), space)
+    with pytest.raises(RoiExtractionError, match="requires an unscaled 640x480"):
+        extract_game_roi(np.zeros((481, 640, 3), dtype=np.uint8), space)

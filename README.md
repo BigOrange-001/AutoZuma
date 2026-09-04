@@ -21,6 +21,7 @@ AutoZumaNext/
 
 See `docs/assets.md` for the migrated visual/topology asset inventory.
 See `docs/session_handoff.md` for the current refactor status and next-step guidance.
+See `docs/development_overview.md` for the current code-level runtime and capability baseline.
 See `AGENTS.md` for repository test policy and targeted test commands.
 
 ## Launch

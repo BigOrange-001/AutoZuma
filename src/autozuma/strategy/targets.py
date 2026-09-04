@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import math
-from bisect import bisect_left
 from dataclasses import dataclass
 
 from autozuma.core.models import (
-    BallEntity,
     Cluster,
     LevelRuntimeAssets,
     Point,
@@ -20,7 +18,9 @@ from autozuma.strategy.actions import (
     is_cluster_locked,
     is_deadzone_locked,
 )
+from autozuma.strategy.aiming import BallAim, aim_at_ball_entities
 from autozuma.strategy.line_of_sight import reachable_entities
+from autozuma.vision.clusters import MAX_CLUSTER_TRACK_IDX_GAP
 from autozuma.vision.colors import UNKNOWN_COLOR
 
 ELIM_TARGET = "ELIM"
@@ -50,7 +50,6 @@ class TargetScoringParams:
     reachable_radius_far: float = 22.0
     reachable_full_distance: float = 900.0
     projectile_width: float = 32.0
-    aim_ball_radius: float = 16.0
 
 
 def score_basic_targets(
@@ -81,6 +80,8 @@ def score_basic_targets_for_color(
     for cluster_idx, cluster in enumerate(world_state.clusters):
         if cluster.color != target_color:
             continue
+        if cluster.visibility_region < 0:
+            continue
         if not cluster.entities:
             continue
         if _is_adjacent_to_same_color_cluster(world_state.clusters, cluster_idx, target_color):
@@ -103,15 +104,12 @@ def score_basic_targets_for_color(
         if not reachable:
             continue
 
-        aim_point, context_entity, aim_track_idx = _cluster_target_context(
-            cluster,
-            reachable,
-            track,
-            params,
-        )
+        ball_aim = aim_at_ball_entities(reachable, track)
+        if ball_aim is None:
+            continue
         if _is_action_locked(
-            center_point=aim_point,
-            track_idx=aim_track_idx,
+            center_point=ball_aim.point,
+            track_idx=ball_aim.track_idx,
             cluster=cluster,
             params=params,
         ):
@@ -123,7 +121,8 @@ def score_basic_targets_for_color(
             track=track,
             target_color=target_color,
             frog_pivot=level.topology.frog_pivot,
-            reachable=reachable,
+            ball_aim=ball_aim,
+            reachable_count=len(reachable),
             params=params,
         )
         candidates.append(candidate)
@@ -145,16 +144,13 @@ def _score_cluster(
     track: TrackGeometry,
     target_color: str,
     frog_pivot: Point,
-    reachable: tuple[BallEntity, ...],
+    ball_aim: BallAim,
+    reachable_count: int,
     params: TargetScoringParams,
 ) -> TargetCandidate:
     cluster = clusters[cluster_idx]
-    aim_point, _, track_idx = _cluster_target_context(
-        cluster,
-        reachable,
-        track,
-        params,
-    )
+    aim_point = ball_aim.point
+    track_idx = ball_aim.track_idx
 
     target_type, base_score, combo_depth = _classify_target(
         clusters=clusters,
@@ -192,52 +188,17 @@ def _score_cluster(
         target_type=target_type,
         reason=(
             f"cluster track={cluster.track_id} color={cluster.color} size={cluster.size} "
-            f"reachable={len(reachable)} "
+            f"reachable={reachable_count} "
             f"orthogonality={orthogonality:.3f} straightness={straightness:.3f} "
             f"combo_depth={combo_depth}"
         ),
         combo_depth=combo_depth,
         track_id=cluster.track_id,
+        visibility_region=cluster.visibility_region,
         track_idx=track_idx,
         cluster_start_idx=cluster.start_idx,
         cluster_end_idx=cluster.end_idx,
     )
-
-
-def _cluster_target_context(
-    cluster: Cluster,
-    reachable: tuple[BallEntity, ...] | None = None,
-    track: TrackGeometry | None = None,
-    params: TargetScoringParams = TargetScoringParams(),
-) -> tuple[Point, BallEntity, int]:
-    entities = reachable if reachable is not None else cluster.entities
-    if len(entities) % 2 == 0:
-        aim_entity = entities[len(entities) // 2]
-        return Point(x=aim_entity.x, y=aim_entity.y), aim_entity, aim_entity.track_idx
-
-    center_entity = entities[len(entities) // 2]
-    if track is None or not track.points or params.aim_ball_radius <= 0.0:
-        return Point(x=center_entity.x, y=center_entity.y), center_entity, center_entity.track_idx
-
-    track_idx = _track_idx_with_forward_distance(
-        center_entity.track_idx,
-        track,
-        params.aim_ball_radius,
-    )
-    aim_point = track.points[track_idx]
-    return aim_point, center_entity, track_idx
-
-
-def _track_idx_with_forward_distance(
-    track_idx: int,
-    track: TrackGeometry,
-    distance_pixels: float,
-) -> int:
-    clamped_idx = _clamp_track_idx(track_idx, track)
-    if not track.cumulative_distances or len(track.cumulative_distances) != len(track.points):
-        return clamped_idx
-    target_distance = track.cumulative_distances[clamped_idx] + distance_pixels
-    return _clamp_track_idx(bisect_left(track.cumulative_distances, target_distance), track)
 
 
 def _is_action_locked(
@@ -276,7 +237,9 @@ def _classify_target(
     combo_depth = _potential_combo_depth(clusters, cluster_idx) - 1
     max_other_depth = _max_nearby_other_combo_depth(clusters, cluster_idx)
     if max_other_depth > combo_depth + 1:
-        return PAIR_TARGET, params.pair_priority, 0
+        # Keep the prototype's low priority without changing the semantic target
+        # type: PAIR is reserved for a real single-ball insertion.
+        return ELIM_TARGET, params.pair_priority, 0
     if combo_depth >= 1:
         return COMBO_TARGET, params.combo_priority, combo_depth
     if _is_rollback_elimination(clusters, cluster_idx, target_color):
@@ -288,6 +251,8 @@ def _potential_combo_depth(clusters: tuple[Cluster, ...], cluster_idx: int) -> i
     depth = 1
     left_idx = cluster_idx - 1
     right_idx = cluster_idx + 1
+    left_boundary = clusters[cluster_idx]
+    right_boundary = clusters[cluster_idx]
     while True:
         left_idx = _previous_known_cluster_idx(clusters, left_idx)
         right_idx = _next_known_cluster_idx(clusters, right_idx)
@@ -298,11 +263,16 @@ def _potential_combo_depth(clusters: tuple[Cluster, ...], cluster_idx: int) -> i
         right = clusters[right_idx]
         target = clusters[cluster_idx]
         if (
-            left.track_id == right.track_id == target.track_id
+            _clusters_are_adjacent(left, left_boundary)
+            and _clusters_are_adjacent(right_boundary, right)
+            and left.track_id == right.track_id == target.track_id
+            and left.visibility_region == right.visibility_region == target.visibility_region
             and left.color == right.color
             and left.size + right.size >= 3
         ):
             depth += 1
+            left_boundary = left
+            right_boundary = right
             left_idx -= 1
             right_idx += 1
             continue
@@ -336,7 +306,10 @@ def _is_rollback_elimination(
     left = clusters[left_idx]
     right = clusters[right_idx]
     return (
-        left.track_id == right.track_id == cluster.track_id
+        _clusters_are_adjacent(left, cluster)
+        and _clusters_are_adjacent(cluster, right)
+        and left.track_id == right.track_id == cluster.track_id
+        and left.visibility_region == right.visibility_region == cluster.visibility_region
         and left.color == right.color
         and left.color != target_color
     )
@@ -350,33 +323,41 @@ def _is_adjacent_to_same_color_cluster(
     left_idx = _previous_known_cluster_idx(clusters, cluster_idx - 1)
     if left_idx is not None:
         left = clusters[left_idx]
-        if left.track_id == clusters[cluster_idx].track_id and left.color == target_color:
+        if (
+            _clusters_are_adjacent(left, clusters[cluster_idx])
+            and left.color == target_color
+        ):
             return True
 
     right_idx = _next_known_cluster_idx(clusters, cluster_idx + 1)
     if right_idx is not None:
         right = clusters[right_idx]
-        if right.track_id == clusters[cluster_idx].track_id and right.color == target_color:
+        if (
+            _clusters_are_adjacent(clusters[cluster_idx], right)
+            and right.color == target_color
+        ):
             return True
     return False
 
 
 def _previous_known_cluster_idx(clusters: tuple[Cluster, ...], start_idx: int) -> int | None:
-    idx = start_idx
-    while idx >= 0 and clusters[idx].color == UNKNOWN_COLOR:
-        idx -= 1
-    if idx < 0:
+    if start_idx < 0 or clusters[start_idx].color == UNKNOWN_COLOR:
         return None
-    return idx
+    return start_idx
 
 
 def _next_known_cluster_idx(clusters: tuple[Cluster, ...], start_idx: int) -> int | None:
-    idx = start_idx
-    while idx < len(clusters) and clusters[idx].color == UNKNOWN_COLOR:
-        idx += 1
-    if idx >= len(clusters):
+    if start_idx >= len(clusters) or clusters[start_idx].color == UNKNOWN_COLOR:
         return None
-    return idx
+    return start_idx
+
+
+def _clusters_are_adjacent(left: Cluster, right: Cluster) -> bool:
+    return (
+        left.track_id == right.track_id
+        and left.visibility_region == right.visibility_region
+        and 0 <= right.start_idx - left.end_idx < MAX_CLUSTER_TRACK_IDX_GAP
+    )
 
 
 def _shot_track_orthogonality(
@@ -425,7 +406,3 @@ def _track_straightness(track: TrackGeometry, track_idx: int) -> float:
         return 1.0
 
     return (prev_dx * next_dx + prev_dy * next_dy) / (prev_length * next_length)
-
-
-def _clamp_track_idx(track_idx: int, track: TrackGeometry) -> int:
-    return max(0, min(len(track.points) - 1, track_idx))

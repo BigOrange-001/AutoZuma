@@ -107,6 +107,30 @@ def test_check_line_of_sight_ignores_same_track_entities_inside_target_neighborh
     assert math.isinf(result.min_distance)
 
 
+def test_check_line_of_sight_does_not_ignore_same_track_entity_from_other_visible_region():
+    result = check_line_of_sight(
+        frog_pivot=Point(x=0, y=0),
+        target=Point(x=100, y=0),
+        entities=(
+            BallEntity(
+                x=55,
+                y=0,
+                track_id=0,
+                track_idx=55,
+                color="red",
+                visibility_region=0,
+            ),
+        ),
+        min_gap=20,
+        target_track_id=0,
+        target_visibility_region=1,
+        target_track_idx=80,
+    )
+
+    assert result.is_clear is False
+    assert result.min_distance == 0
+
+
 def _entity(x: float, y: float, track_id: int, track_idx: int) -> BallEntity:
     return BallEntity(
         x=x,

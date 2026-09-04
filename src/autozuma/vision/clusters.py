@@ -41,6 +41,7 @@ def _belongs_to_cluster(
 ) -> bool:
     return (
         entity.track_id == previous.track_id
+        and entity.visibility_region == previous.visibility_region
         and entity.color == previous.color
         and entity.track_idx - previous.track_idx < max_track_idx_gap
     )
@@ -53,4 +54,5 @@ def _build_cluster(entities: list[BallEntity]) -> Cluster:
         entities=tuple(entities),
         start_idx=entities[0].track_idx,
         end_idx=entities[-1].track_idx,
+        visibility_region=entities[0].visibility_region,
     )

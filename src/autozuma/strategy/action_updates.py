@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass, field
 
 from autozuma.core.models import (
+    Cluster,
     Command,
     CommandType,
     LevelRuntimeAssets,
@@ -23,6 +24,7 @@ from autozuma.strategy.actions import (
 from autozuma.strategy.coins import BREAKTHROUGH_COIN_TARGET, DIRECT_COIN_TARGET
 from autozuma.strategy.discard import DISCARD_TARGET
 from autozuma.strategy.targets import COMBO_TARGET, ELIM_TARGET, PAIR_TARGET, ROLLBACK_ELIM_TARGET
+from autozuma.vision.clusters import MAX_CLUSTER_TRACK_IDX_GAP
 from autozuma.vision.coins import CoinTrackerState, lock_coin
 from autozuma.vision.colors import UNKNOWN_COLOR
 
@@ -115,7 +117,7 @@ def apply_command_outcome(
             if selected_target.secondary_x is not None and selected_target.secondary_y is not None:
                 coin_tracker = lock_coin(
                     coin_tracker,
-                    point=Point(x=selected_target.secondary_x, y=selected_target.secondary_y),
+                    point=_coin_effect_point(selected_target),
                     current_time=current_time,
                     duration=params.breakthrough_coin_lock_duration,
                 )
@@ -131,7 +133,7 @@ def apply_command_outcome(
             )
             coin_tracker = lock_coin(
                 coin_tracker,
-                point=Point(x=selected_target.x, y=selected_target.y),
+                point=_coin_effect_point(selected_target),
                 current_time=current_time,
                 duration=params.direct_coin_lock_duration,
             )
@@ -147,6 +149,7 @@ def apply_command_outcome(
                 state=action_tracker,
                 target=selected_target,
                 world_state=world_state,
+                level=level,
                 current_time=current_time,
                 duration=lock_duration,
                 params=params,
@@ -178,6 +181,7 @@ def apply_command_outcome(
             action_tracker = _add_target_cluster_lock(
                 state=action_tracker,
                 target=selected_target,
+                level=level,
                 current_time=current_time,
                 duration=lock_duration,
                 params=params,
@@ -212,6 +216,11 @@ def apply_command_outcome(
                     color=fired_color,
                     current_time=current_time,
                     duration=travel_time,
+                    visibility_region=(
+                        selected_target.visibility_region
+                        if selected_target.visibility_region is not None
+                        else 0
+                    ),
                 )
             next_fire_ready_time = current_time + params.fire_cooldown + swap_extra
 
@@ -241,6 +250,7 @@ def _add_combo_locks(
     state: ActionTrackerState,
     target: TargetCandidate,
     world_state: WorldState,
+    level: LevelRuntimeAssets,
     current_time: float,
     duration: float,
     params: CommandOutcomeParams,
@@ -251,6 +261,7 @@ def _add_combo_locks(
     state = _add_target_cluster_lock(
         state=state,
         target=target,
+        level=level,
         current_time=current_time,
         duration=duration,
         params=params,
@@ -262,11 +273,21 @@ def _add_combo_locks(
 
     for adjacent_idx in _combo_chain_cluster_indices(world_state, target_cluster_idx):
         cluster = world_state.clusters[adjacent_idx]
+        lock_range = _bounded_cluster_lock_range(
+            level,
+            cluster.track_id,
+            cluster.start_idx,
+            cluster.start_idx - params.adjacent_combo_lock_padding,
+            cluster.end_idx + params.adjacent_combo_lock_padding,
+        )
+        if lock_range is None:
+            continue
+        lock_start_idx, lock_end_idx = lock_range
         state = add_cluster_lock(
             state,
             track_id=cluster.track_id,
-            start_idx=cluster.start_idx - params.adjacent_combo_lock_padding,
-            end_idx=cluster.end_idx + params.adjacent_combo_lock_padding,
+            start_idx=lock_start_idx,
+            end_idx=lock_end_idx,
             current_time=current_time,
             duration=duration + params.adjacent_combo_lock_extra,
         )
@@ -278,6 +299,7 @@ def _add_target_cluster_lock(
     *,
     state: ActionTrackerState,
     target: TargetCandidate,
+    level: LevelRuntimeAssets,
     current_time: float,
     duration: float,
     params: CommandOutcomeParams,
@@ -289,11 +311,21 @@ def _add_target_cluster_lock(
         target.cluster_start_idx if target.cluster_start_idx is not None else target.track_idx
     )
     end_idx = target.cluster_end_idx if target.cluster_end_idx is not None else target.track_idx
+    lock_range = _bounded_cluster_lock_range(
+        level,
+        target.track_id,
+        target.track_idx,
+        start_idx - params.target_cluster_lock_padding,
+        end_idx + params.target_cluster_lock_padding,
+    )
+    if lock_range is None:
+        return state
+    lock_start_idx, lock_end_idx = lock_range
     return add_cluster_lock(
         state,
         track_id=target.track_id,
-        start_idx=start_idx - params.target_cluster_lock_padding,
-        end_idx=end_idx + params.target_cluster_lock_padding,
+        start_idx=lock_start_idx,
+        end_idx=lock_end_idx,
         current_time=current_time,
         duration=duration,
     )
@@ -311,25 +343,78 @@ def _add_tail_lock(
     if target.track_id is None or target.track_idx is None or duration <= 0.0:
         return state
 
-    track_end_idx = _track_end_idx(level, target.track_id)
-    if track_end_idx is None or target.track_idx >= track_end_idx:
+    region_bounds = _track_visibility_region_bounds(level, target.track_id, target.track_idx)
+    if region_bounds is None:
+        return state
+    region_start_idx, region_end_idx = region_bounds
+    if target.track_idx >= region_end_idx:
         return state
 
     return add_cluster_lock(
         state,
         track_id=target.track_id,
-        start_idx=target.track_idx - start_padding,
-        end_idx=track_end_idx,
+        start_idx=max(region_start_idx, target.track_idx - start_padding),
+        end_idx=region_end_idx,
         current_time=current_time,
         duration=duration,
     )
 
 
-def _track_end_idx(level: LevelRuntimeAssets, track_id: int) -> int | None:
+def _track_visibility_region_bounds(
+    level: LevelRuntimeAssets,
+    track_id: int,
+    track_idx: int,
+) -> tuple[int, int] | None:
     for track in level.geometry.tracks:
-        if track.track_id == track_id and track.points:
-            return len(track.points) - 1
+        if track.track_id != track_id or not track.points:
+            continue
+        clamped_idx = max(0, min(len(track.points) - 1, track_idx))
+        if len(track.visibility_region_ids) != len(track.points):
+            return 0, len(track.points) - 1
+        region = track.visibility_region_ids[clamped_idx]
+        if region < 0:
+            return None
+        start_idx = clamped_idx
+        while start_idx > 0 and track.visibility_region_ids[start_idx - 1] == region:
+            start_idx -= 1
+        end_idx = clamped_idx
+        while (
+            end_idx + 1 < len(track.points)
+            and track.visibility_region_ids[end_idx + 1] == region
+        ):
+            end_idx += 1
+        return start_idx, end_idx
     return None
+
+
+def _coin_effect_point(target: TargetCandidate) -> Point:
+    if target.coin_x is not None and target.coin_y is not None:
+        return Point(x=target.coin_x, y=target.coin_y)
+    if target.secondary_x is not None and target.secondary_y is not None:
+        return Point(x=target.secondary_x, y=target.secondary_y)
+    return Point(x=target.x, y=target.y)
+
+
+def _bounded_cluster_lock_range(
+    level: LevelRuntimeAssets,
+    track_id: int,
+    track_idx: int,
+    requested_start_idx: int,
+    requested_end_idx: int,
+) -> tuple[int, int] | None:
+    """Clamp a lock to its visible region when real track geometry is available."""
+    bounds = _track_visibility_region_bounds(level, track_id, track_idx)
+    if bounds is None:
+        has_track_geometry = any(
+            track.track_id == track_id and bool(track.points)
+            for track in level.geometry.tracks
+        )
+        return None if has_track_geometry else (requested_start_idx, requested_end_idx)
+    region_start_idx, region_end_idx = bounds
+    return (
+        max(region_start_idx, requested_start_idx),
+        min(region_end_idx, requested_end_idx),
+    )
 
 
 def _combo_chain_cluster_indices(
@@ -341,6 +426,8 @@ def _combo_chain_cluster_indices(
     chain_indices: list[int] = []
     left_idx = target_cluster_idx - 1
     right_idx = target_cluster_idx + 1
+    left_boundary = target
+    right_boundary = target
 
     while True:
         left_idx = _previous_known_cluster_idx(world_state, left_idx)
@@ -351,11 +438,16 @@ def _combo_chain_cluster_indices(
         left = clusters[left_idx]
         right = clusters[right_idx]
         if (
-            left.track_id == right.track_id == target.track_id
+            _clusters_are_adjacent(left, left_boundary)
+            and _clusters_are_adjacent(right_boundary, right)
+            and left.track_id == right.track_id == target.track_id
+            and left.visibility_region == right.visibility_region == target.visibility_region
             and left.color == right.color
             and left.size + right.size >= 3
         ):
             chain_indices.append(right_idx)
+            left_boundary = left
+            right_boundary = right
             left_idx -= 1
             right_idx += 1
             continue
@@ -370,6 +462,10 @@ def _target_cluster_index(target: TargetCandidate, world_state: WorldState) -> i
     for idx, cluster in enumerate(world_state.clusters):
         if (
             cluster.track_id == target.track_id
+            and (
+                target.visibility_region is None
+                or cluster.visibility_region == target.visibility_region
+            )
             and cluster.start_idx == target.cluster_start_idx
             and cluster.end_idx == target.cluster_end_idx
         ):
@@ -378,21 +474,26 @@ def _target_cluster_index(target: TargetCandidate, world_state: WorldState) -> i
 
 
 def _previous_known_cluster_idx(world_state: WorldState, start_idx: int) -> int | None:
-    idx = start_idx
-    while idx >= 0 and world_state.clusters[idx].color == UNKNOWN_COLOR:
-        idx -= 1
-    if idx < 0:
+    if start_idx < 0 or world_state.clusters[start_idx].color == UNKNOWN_COLOR:
         return None
-    return idx
+    return start_idx
 
 
 def _next_known_cluster_idx(world_state: WorldState, start_idx: int) -> int | None:
-    idx = start_idx
-    while idx < len(world_state.clusters) and world_state.clusters[idx].color == UNKNOWN_COLOR:
-        idx += 1
-    if idx >= len(world_state.clusters):
+    if (
+        start_idx >= len(world_state.clusters)
+        or world_state.clusters[start_idx].color == UNKNOWN_COLOR
+    ):
         return None
-    return idx
+    return start_idx
+
+
+def _clusters_are_adjacent(left: Cluster, right: Cluster) -> bool:
+    return (
+        left.track_id == right.track_id
+        and left.visibility_region == right.visibility_region
+        and 0 <= right.start_idx - left.end_idx < MAX_CLUSTER_TRACK_IDX_GAP
+    )
 
 
 def _travel_time(frog_pivot: Point, target: Point, bullet_speed: float) -> float:

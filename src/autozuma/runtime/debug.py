@@ -161,6 +161,10 @@ def _candidate_cluster(
     for cluster in clusters:
         if (
             cluster.track_id == candidate.track_id
+            and (
+                candidate.visibility_region is None
+                or cluster.visibility_region == candidate.visibility_region
+            )
             and cluster.start_idx == candidate.cluster_start_idx
             and cluster.end_idx == candidate.cluster_end_idx
         ):
@@ -362,6 +366,7 @@ def _target_summary(target: TargetCandidate | None) -> dict[str, object] | None:
         "reason": target.reason,
         "combo_depth": target.combo_depth,
         "track_id": target.track_id,
+        "visibility_region": target.visibility_region,
         "track_idx": target.track_idx,
         "cluster_start_idx": target.cluster_start_idx,
         "cluster_end_idx": target.cluster_end_idx,
@@ -369,6 +374,11 @@ def _target_summary(target: TargetCandidate | None) -> dict[str, object] | None:
             None
             if target.secondary_x is None or target.secondary_y is None
             else {"x": float(target.secondary_x), "y": float(target.secondary_y)}
+        ),
+        "coin": (
+            None
+            if target.coin_x is None or target.coin_y is None
+            else {"x": float(target.coin_x), "y": float(target.coin_y)}
         ),
         "delay_ms": target.delay_ms,
     }

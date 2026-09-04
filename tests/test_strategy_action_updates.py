@@ -37,8 +37,7 @@ from autozuma.vision.colors import UNKNOWN_COLOR
 def test_apply_command_outcome_adds_combo_locks_and_cooldown():
     world_state = _world_state(
         clusters=(
-            _cluster("red", track_id=1, start_idx=50, end_idx=60),
-            _cluster(UNKNOWN_COLOR, track_id=1, start_idx=70, end_idx=75),
+            _cluster("red", track_id=1, start_idx=70, end_idx=75),
             _cluster("blue", track_id=1, start_idx=100, end_idx=120),
             _cluster("red", track_id=1, start_idx=150, end_idx=160),
         )
@@ -74,6 +73,41 @@ def test_apply_command_outcome_adds_combo_locks_and_cooldown():
     )
     assert updated.next_fire_ready_time == 11.025
     assert updated.last_fire_time == 10.0
+
+
+def test_apply_command_outcome_does_not_lock_combo_chain_across_unknown_cluster():
+    world_state = _world_state(
+        clusters=(
+            _cluster("red", track_id=1, start_idx=50, end_idx=60),
+            _cluster(UNKNOWN_COLOR, track_id=1, start_idx=70, end_idx=75),
+            _cluster("blue", track_id=1, start_idx=100, end_idx=120),
+            _cluster("red", track_id=1, start_idx=150, end_idx=160),
+        )
+    )
+    target = TargetCandidate(
+        x=80.0,
+        y=60.0,
+        score=100.0,
+        target_type=COMBO_TARGET,
+        combo_depth=2,
+        track_id=1,
+        track_idx=110,
+        cluster_start_idx=100,
+        cluster_end_idx=120,
+    )
+
+    updated = apply_command_outcome(
+        state=CommandOutcomeState(),
+        command=Command(command_type=CommandType.SHOOT, primary_target=Point(x=80, y=60)),
+        selected_target=target,
+        world_state=world_state,
+        level=_level(),
+        current_time=10.0,
+    )
+
+    assert updated.action_tracker.cluster_locks == (
+        ClusterLock(track_id=1, start_idx=70, end_idx=150, expires_at=11.025),
+    )
 
 
 def test_apply_command_outcome_combo_locks_only_forward_predicted_chain():
@@ -152,6 +186,64 @@ def test_apply_command_outcome_combo_adds_short_tail_lock_when_track_end_is_know
     )
 
 
+def test_apply_command_outcome_combo_tail_lock_stops_at_occluded_region():
+    world_state = _world_state(
+        clusters=(
+            _cluster("blue", track_id=1, start_idx=20, end_idx=30),
+            _cluster("red", track_id=1, start_idx=60, end_idx=70),
+            _cluster("blue", track_id=1, start_idx=100, end_idx=110),
+        )
+    )
+    target = TargetCandidate(
+        x=0.0,
+        y=80.0,
+        score=100.0,
+        target_type=COMBO_TARGET,
+        combo_depth=1,
+        track_id=1,
+        visibility_region=0,
+        track_idx=65,
+        cluster_start_idx=60,
+        cluster_end_idx=70,
+    )
+    level = _level_with_track_end(201)
+    track = level.geometry.tracks[0]
+    visibility = tuple(0 if index <= 80 else -1 if index <= 119 else 1 for index in range(201))
+    level = LevelRuntimeAssets(
+        level_id=level.level_id,
+        topology=level.topology,
+        geometry=LevelGeometry(
+            level_id=level.geometry.level_id,
+            tracks=(
+                TrackGeometry(
+                    track_id=track.track_id,
+                    points=track.points,
+                    cumulative_distances=track.cumulative_distances,
+                    visibility_region_ids=visibility,
+                ),
+            ),
+        ),
+        background=None,
+    )
+
+    updated = apply_command_outcome(
+        state=CommandOutcomeState(),
+        command=Command(command_type=CommandType.SHOOT, primary_target=Point(x=0, y=80)),
+        selected_target=target,
+        world_state=world_state,
+        level=level,
+        current_time=10.0,
+    )
+
+    assert ClusterLock(track_id=1, start_idx=65, end_idx=80, expires_at=10.8) in (
+        updated.action_tracker.cluster_locks
+    )
+    assert ClusterLock(track_id=1, start_idx=30, end_idx=80, expires_at=10.8) in (
+        updated.action_tracker.cluster_locks
+    )
+    assert all(lock.end_idx <= 80 for lock in updated.action_tracker.cluster_locks)
+
+
 def test_apply_command_outcome_adds_pair_virtual_ball_with_swapped_color():
     world_state = _world_state(current_ball="red", next_ball="green")
     target = TargetCandidate(
@@ -189,6 +281,8 @@ def test_apply_command_outcome_locks_direct_coin_and_adds_travel_deadzone():
         y=80.0,
         score=100.0,
         target_type=DIRECT_COIN_TARGET,
+        coin_x=10.0,
+        coin_y=80.0,
     )
 
     updated = apply_command_outcome(
@@ -205,7 +299,7 @@ def test_apply_command_outcome_locks_direct_coin_and_adds_travel_deadzone():
         Deadzone(point=Point(x=0.0, y=80.0), expires_at=10.1),
     )
     assert updated.coin_tracker.locks == (
-        CoinLock(point=Point(x=0.0, y=80.0), expires_at=11.0),
+        CoinLock(point=Point(x=10.0, y=80.0), expires_at=11.0),
     )
     assert updated.next_fire_ready_time == 10.3
 
@@ -218,6 +312,8 @@ def test_apply_command_outcome_locks_breakthrough_coin_and_uses_double_shot_dela
         target_type=BREAKTHROUGH_COIN_TARGET,
         secondary_x=200.0,
         secondary_y=10.0,
+        coin_x=195.0,
+        coin_y=10.0,
         delay_ms=250,
     )
 
@@ -240,7 +336,7 @@ def test_apply_command_outcome_locks_breakthrough_coin_and_uses_double_shot_dela
         Deadzone(point=Point(x=0.0, y=80.0), expires_at=10.1),
     )
     assert updated.coin_tracker.locks == (
-        CoinLock(point=Point(x=200.0, y=10.0), expires_at=12.0),
+        CoinLock(point=Point(x=195.0, y=10.0), expires_at=12.0),
     )
     assert updated.last_swap_time == 10.0
     assert updated.next_fire_ready_time == pytest.approx(10.625)

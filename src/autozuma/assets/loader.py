@@ -25,8 +25,8 @@ def load_topology_file(path: Path) -> LevelTopology:
     if not isinstance(data, dict):
         raise InvalidTopologyError(f"Topology root must be an object: {path}")
 
-    level_id = path.stem
-    requires_special_detection = level_id.lower() in SPECIAL_DETECTION_LEVEL_IDS
+    level_id = path.stem.lower()
+    requires_special_detection = level_id in SPECIAL_DETECTION_LEVEL_IDS
     return LevelTopology(
         level_id=level_id,
         frog_pivot=_parse_point(data.get("frog_pivot"), "frog_pivot", path),
@@ -45,7 +45,7 @@ def load_all_topologies(paths: AssetPaths) -> dict[str, LevelTopology]:
     topologies: dict[str, LevelTopology] = {}
     for path in sorted(paths.level_topology.glob("*.json")):
         topology = load_topology_file(path)
-        key = topology.level_id.lower()
+        key = topology.level_id
         if key in topologies:
             raise InvalidTopologyError(f"Duplicate topology level id: {topology.level_id}")
         topologies[key] = topology

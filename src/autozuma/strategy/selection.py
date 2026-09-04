@@ -28,6 +28,7 @@ def select_best_clear_target(
             entities=world_state.entities,
             min_gap=params.min_gap,
             target_track_id=candidate.track_id,
+            target_visibility_region=candidate.visibility_region,
             target_track_idx=candidate.track_idx,
             cluster_start_idx=candidate.cluster_start_idx,
             cluster_end_idx=candidate.cluster_end_idx,

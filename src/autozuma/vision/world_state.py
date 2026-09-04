@@ -1,4 +1,4 @@
-"""Static-level world-state perception orchestration."""
+"""Level world-state perception orchestration."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def detect_static_world_state(
     p_start_exclude: float = 0.0,
     p_end_exclude: float = 0.0,
 ) -> WorldState:
-    """Detect the playable world state for a static-background level."""
+    """Detect the playable world state for a supported level."""
     roi_result = extract_game_roi(frame_bgr, level)
     return detect_static_world_state_from_roi(
         frame_roi_bgr=roi_result.frame,
@@ -36,7 +36,7 @@ def detect_static_world_state_from_roi(
     p_start_exclude: float = 0.0,
     p_end_exclude: float = 0.0,
 ) -> WorldState:
-    """Detect the playable world state from an already aligned static-level ROI."""
+    """Detect the playable world state from an already aligned level ROI."""
     launcher = detect_launcher_state(
         frame_roi_bgr=frame_roi_bgr,
         frog_pivot=level.topology.frog_pivot,

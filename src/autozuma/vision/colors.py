@@ -36,8 +36,27 @@ TARGET_HSV = cv2.cvtColor(np.array([TARGET_COLORS_BGR], dtype=np.uint8), cv2.COL
 ].astype(np.float32)
 
 
-def classify_entity_color(frame_bgr: np.ndarray, cx: float, cy: float, radius: int = 11) -> str:
-    """Classify the dominant Zuma ball color around a circular sample region."""
+def classify_entity_color(
+    frame_bgr: np.ndarray,
+    cx: float,
+    cy: float,
+    radius: int = 11,
+    *,
+    min_value: float = 0.0,
+    min_valid_fraction: float = 0.0,
+    min_dominant_fraction: float = 0.0,
+) -> str:
+    """Classify the dominant Zuma ball color around a circular sample region.
+
+    Optional vote thresholds let small, visually exposed launcher samples reject
+    background/template contamination without changing track-ball recognition.
+    """
+    if not 0.0 <= min_value <= 255.0:
+        raise ValueError("min_value must be between 0 and 255")
+    if not 0.0 <= min_valid_fraction <= 1.0:
+        raise ValueError("min_valid_fraction must be between 0 and 1")
+    if not 0.0 <= min_dominant_fraction <= 1.0:
+        raise ValueError("min_dominant_fraction must be between 0 and 1")
     height, width = frame_bgr.shape[:2]
     y1 = max(0, int(cy) - radius)
     y2 = min(height, int(cy) + radius)
@@ -59,8 +78,15 @@ def classify_entity_color(frame_bgr: np.ndarray, cx: float, cy: float, radius: i
     diff_v = pixels[:, np.newaxis, 2] - TARGET_HSV[np.newaxis, :, 2]
     distances = np.sqrt((2.0 * diff_h) ** 2 + diff_s**2 + (0.2 * diff_v) ** 2)
     nearest_target_indexes = np.argmin(distances, axis=1)
-    valid_indexes = nearest_target_indexes[np.min(distances, axis=1) < 90.0]
+    valid_pixels = (np.min(distances, axis=1) < 90.0) & (pixels[:, 2] >= min_value)
+    valid_indexes = nearest_target_indexes[valid_pixels]
     if len(valid_indexes) < 5:
         return UNKNOWN_COLOR
+    if len(valid_indexes) / len(pixels) < min_valid_fraction:
+        return UNKNOWN_COLOR
 
-    return Counter(TARGET_LABELS[index] for index in valid_indexes).most_common(1)[0][0]
+    color_counts = Counter(TARGET_LABELS[index] for index in valid_indexes)
+    dominant_color, dominant_count = color_counts.most_common(1)[0]
+    if dominant_count / len(valid_indexes) < min_dominant_fraction:
+        return UNKNOWN_COLOR
+    return dominant_color
